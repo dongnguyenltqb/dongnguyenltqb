@@ -1,0 +1,131 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "December 26, 2019",
+  slug: "/blog/nginx-basic",
+  title: "Nginx là gì, setup một server serve static file với Nginx.",
+  description: "",
+}
+
+export default Post(meta)
+
+Chắc hẳn nếu bạn đang là lập trình viên, bạn cũng đã có đôi lần nghe qua Nginx. Nginx là một web server rất nổi tiếng, nó có thể được dùng để serve static file, làm load balancer cho hệt thống đằng sau nó, hay thậm chí là mail server hay video streaming server, với việc sử dụng thêm “rtmp module"
+
+Do sự giới hạn về trình đô nên hôm nay mình sẽ chỉ nói về cách mà Nginx hoạt động xử lí request đang tới như thế nào và sau đó mình sẽ hướng dẫn các bạn setup một server để serve static file.
+
+Đầu tiên Nginx hoạt động như thế nào và nó ra đời để giải quyết vấn đề gì.
+
+Trước khi nginx ra đời thì có Apache Server cũng đã làm rất tốt nhiệm vụ của một web server. Nhưng sau này khi mà internet đến với nhiều người hơn, một lượng lớn kết nối đổ dập tới server khiếncho Apache không xử lí được.
+
+Apache handle mỗi request bằng cách tạo ra 1 thread để xử lí nó, khiến server tiêu tốn rất nhiều RAM và bị sập khi số lượng Request đồng thời lớn do bộ nhớ không đám ứng được.
+
+Còn đối với Nginx, nginx không xử lí request theo hướng thread, nó xử lí request bất đồng bộ theo hướng sự kiện, sử dụng ít tài nguyên.
+
+![img](https://miro.medium.com/max/2048/1*jUa3xOqRW8gPFShWiAYnzg.png)
+
+Thành phần chính của Nginx là Master Process và N Worker Process.
+
+Master Process là cái được khởi chạy đầu tiền, đọc file cấu hình, khởi tạo và chạy N Worker processs, hứng request phân chia cho Worker và đồng thời cũng nhận kết quả từ Worker Process để trả lại cho client.
+
+Tiếp theo, hãy cùng tạo 1 server serve static file.
+
+- Trước hết cài đặt Nginx, với linux các bạn chỉ cần chạy lệnh sau
+  sudo apt install nginx
+
+Mặc định thì File config nằm ở “/etc/nginx/nginx.conf”
+
+![img](https://miro.medium.com/max/3832/1*-zOAwkUkeq_D7FXzSf0PRQ.png)
+
+Theo mặc định khi bạn chạy một server và cần nginx là front-end cho server đó thì bạn phải khai báo server và các thuộc tính cần thiết trong thư mục “site-enabled", giả sử mình có một server có tên là “dongnguyen.dev" đang chạy thì mình phải tạo một file config trong thư mục “sites-enabled" có tên tuỳ thích nhưng hơn hết đễ dễ nhìn mình sẽ đặt tên file config của mình là “dongnguyen.dev.conf"
+
+Theo mặc định Nginx khi khởi chạy sẽ gom tất cả nội dung trong thư mục “sites-enabled" để phân tích là xử lí. Có thể nhận thế điều này khi trong file “nginx.conf" trên có xuất hiện dòng này
+
+![img](https://miro.medium.com/max/3156/1*hVPSqteTuP9q9fIStopvAw.png)
+
+Mình cấu hình nội dung file như sau.
+
+![img](https://miro.medium.com/max/2216/1*66pL5Nxwkamx_43wS6_-uQ.png)
+
+Trong Block “server” chúng ta đang cho nói với Nginx rằng hãy lắng nghe trên cổng 443 và sử dụng giao thức HTTP/2 và sử dụng chứng chỉ SSL cho server có tên là “dongnguyen.dev"
+
+Để thêm SSL config cho server chúng ta include ssl config trong thư mục snippet của Nginx. Để tạo SSL cho server chúng ta có thể sử dụng một dịch vụ miễn phí của _“_[_https://letsencrypt.org/_](https://letsencrypt.org/)_”_
+
+Đầu tiên chạy lệnh sau, lệnh này sẽ install certbot cli cho chúng ta.
+
+1. sudo apt-get update
+2. sudo apt-get install software-properties-common
+3. sudo add-apt-repository universe
+4. sudo add-apt-repository ppa:certbot/certbot
+5. sudo apt-get update
+
+Chạy tiếp
+
+```
+sudo apt-get install certbot python-certbot-nginx
+```
+
+Giờ mình sẽ dùng certbot để generate private key và fullchain, nếu tạo thành công bạn sẽ nhìn thấy 2 file quan trọng tên là “fullchain.pem" và “privkey.pem"
+
+![img](https://miro.medium.com/max/2524/1*6XEC2mwE25RDWanvoHq7pQ.png)
+
+Các bạn thêm 2 file sau vào thư mục Snippet của Nginx, nhớ thay đổi tên server cho phù hợp với bạn.
+
+```
+# ssl-dongnguyen.dev.conf
+ssl_certificate /etc/letsencrypt/live/dongnguyen.dev/fullchain.pem;
+ssl_certificate_key /etc/letsencrypt/live/dongnguyen.dev/privkey.pem;
+```
+
+```
+# ssl-params.conf
+ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
+ssl_prefer_server_ciphers on;
+ssl_ciphers "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH";
+ssl_ecdh_curve secp384r1;
+ssl_session_cache shared:SSL:10m;
+ssl_session_tickets off;
+ssl_stapling on;
+ssl_stapling_verify on;
+resolver 8.8.8.8 8.8.4.4 valid=300s;
+resolver_timeout 5s;
+
+ssl_dhparam /etc/ssl/certs/dhparam.pem;
+```
+
+Qua trở lại với file config cho con server của chúng ta trong “sites-enabled"
+
+![img](https://miro.medium.com/max/2216/1*66pL5Nxwkamx_43wS6_-uQ.png)
+
+ở đây chúng ta có hai location để nói với nginx sau khi “listen” trên cổng 443 nếu nhận được request nào match với các location trên thì xử lí theo những gì quy ước trong đó
+
+Lưu ý không giống như Golang Router Handler function nào được khai báo trước thì sẽ được check trước, với nghinx thì người lại các location được khia báo sau sẽ có độ ưu tiên cao hơn.
+
+Như trong hình khi client truy cập vào “dongnguyen.dev/static/xxx/yyy/zzz" thì sẽ match,l nó sẽ thực hiện tiếp việc “try_files “ và check em liệu trong “/var/www/dongnguyen.dev" có file mà client đang lấy hay không nếu không sẽ trả về status 404.
+
+Trước khi khởi động server hãy chắc chắn bạn chỉnh sửa đúng file config
+
+Chạy lệnh “sudo nginx -t” nếu các file config của bạn OK thì nó sẽ báo như hình dưới.
+
+![img](https://miro.medium.com/max/2832/1*6tzoqMzWQ4HVzCLIpohPqQ.png)
+
+Khởi chạy server bằng cách chạy lệnh “sudo systemctl start nginx”.
+
+Tạo một vài static file trong thư mục “/var/root/www/dongnguyen.dev/static/” xem chúng ta có lấy được gì ko.
+
+Mình đã copy một đống anh vào trong server của mình, mình tạo thư mục “/var/root/www/dongnguyen.dev/static/image” để chứa ảnh. và bây giờ nếu muốn lấy ảnh nào đó thì mình chỉ cần map theo đúng đường dẫn của ảnh là được. Ví dụ để lấy file “cold.png" thì mình chỉ cần truy cập
+
+“https://dongnguyen.dev/static/image/cold.png"
+
+![img](https://miro.medium.com/max/3132/1*oojCGqgd8rbiWtKrj3563Q.png)
+
+Mở trình duyệt lên và tèng teng.
+
+![img](https://miro.medium.com/max/5120/1*uizqOND7TUTiAopLbfgraw.png)
+
+Vậy là ta đã dùng nginx để static file và nếu mình truy cập vào “https://dongnguyen.dev” thì nó sẽ proxy_pass qua con server đang chạy trên cổng 8080 của mình.
+
+![img](https://miro.medium.com/max/5120/1*pSguNzKd_nRUfw868WXpPg.png)
+
+Đến đây là hết rồi :)) Nginx có thể làm được rất nhiều thứ hay nếu bạn muốn học Nginx hay vào ngay trang chủ của nó. Riêng mình do giới hạn về trình độ nên mình chỉ có thể chia sẻ đến đây.
+
+Cảm ơn các bạn đã đọc bài. ^\_^

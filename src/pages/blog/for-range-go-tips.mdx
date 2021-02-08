@@ -1,0 +1,132 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "March 9, 2020",
+  slug: "/blog/for-range-go-tips",
+  title: "Tips and Tricks khi sử dụng For loop trong Go.",
+  description: "",
+}
+
+export default Post(meta)
+
+Go cung cấp hai cách để lặp qua các phần tử của một mảng, slice và map. Nó là for và for range, nhiều người thường thích sử dụng for range hơn khi không cần phải quan tâm đến index.
+Lặp và lấy pointer của từng phần tử
+Giả sử có một đoạn mã như dưới đây để lấy con trỏ của từng phần tử trong một mảng và tạo một mảng mới với con trỏ tương ứng
+
+```go
+ arr := [2]int{1, 2}
+res := []*int{}
+for _, v := range arr {
+  fmt.Println(&v)
+  res = append(res, &v)
+}
+//expect: 1 2
+fmt.Println(*res[0],*res[1])
+//but output: 2 2
+```
+
+Như kết quả trên cho thấy, output không như mong đợi. Nó chỉ in phần tử cuối cùng. Vấn đề là gì? Vấn đề tương tự này cũng gặp phải khi dùng cho slice và map.
+Nếu bạn xem qua source code của go, thật dễ để nhận ra for range thực chất là for loop thêm mắm muối vào, nó vẫn sử dụng một vòng lặp for và trước tiên nó sẽ sao chép tất cả các phần tử của mảng và lặp qua chúng và gán từng chỉ số và giá trị cho một biến tạm, vì thế khi chúng ta lấy địa chỉ của pointer của value thì nó sẽ luôn là một giá trị dẫn đến kết quả phía trên luôn cùng giá trị.
+
+```go
+ // len_temp := len(range)
+// range_temp := range
+// for index_temp = 0; index_temp < len_temp; index_temp++ {
+//     value_temp = range_temp[index_temp]
+//     index = index_temp
+//     value = value_temp
+//     original body
+//   }
+```
+
+Vậy làm sao để xử lí nó ?
+Có 2 cách một là sử dụng index để lấy giá trị phần tử.
+
+```go
+ for k := range arr {
+    res = append(res, &arr[k])
+}
+```
+
+Hoặc là sử dụng biến local để copy pointer của value đó.
+
+```go
+ for _, v := range arr {
+    // giá trị của v được gán vào một biến local mới v1
+    v1 := v
+    res = append(res, &v1)
+}
+```
+
+2. Liệu vòng lặp dưới sẽ là vô tận ?
+   Giả sử có đoạn mã dưới đây lặp lại một mảng và mảng đó được thay đổi trong chính vòng lặp
+
+```go
+ v := []int{1, 2, 3}
+for i := range v {
+    v = append(v, i)
+}
+```
+
+The answer is no. As explained earlier, when the loop begins, it will copy the original array to a new one and loop through the elements, hence when appending elements to the original array, the copied array actually doesn’t change.
+Câu trả lời là không nếu bạn để ý (1) phía trên thì khi vòng lặp bắt đầu nó sẽ copy slice ra một slice mới là lặp trên đó, vì vậy các bạn có thay đổi v thì cũng không ảnh hưởng, nó sẽ chỉ lặp từng đó lần thôi.
+Bạn có thể kiểm chứng bằng đoạn code dưới đây.
+
+```go
+ arr := []int{1, 2, 3}
+for i,v := range arr {
+   fmt.Println(i,v)
+   arr = []int{}
+}
+fmt.Println(arr)
+// output
+0 1
+1 2
+2 3
+[]
+```
+
+3. Vấn đề với việc lặp qua một mảng lớn.
+
+```go
+ var arr = [102400]int{1, 1, 1}
+for i, n := range arr {
+    // để ví dụ thì mình bỏ qua i và n
+    _ = i
+    _ = n
+}
+```
+
+Vấn đề là nó sẽ tiêu tốn lượng mem khá lớn khi đầu tiên nó sẽ copy tất cả phần tử sang một mảng mới với số lượng phần tử (n) như mảng cũ. Mặc dù mình không dùng đến 102400 phần tử
+Để giải quyết có hai cách sau
+
+```go
+ // lấy địa chỉ của mảng gốc và lặp
+for i, n := range &arr
+
+// tạo 1 slice có từ arr ban đầu để sử dụng ít bố nhớ hơn
+for i, n := range arr[:]
+```
+
+4. Reset giá trị của mảng một cách hiệu quả với for range ?
+
+```go
+ var arr = [102400]int{1, 1, 1}
+for i, _ := range &arr {
+    arr[i] = 0
+}
+```
+
+Câu trả lời là có, Go đã tối ưu hóa về việc đặt lại giá trị thành giá trị mặc định trong source code. Các bạn có thể xem qua issue này
+
+```go
+// Lower n into runtime·memclr if possible, for
+// fast zeroing of slices and arrays (issue 5373).
+// Look for instances of
+//
+// for i := range a {
+// 	a[i] = zero
+// }
+//
+// in which the evaluation of a is side-effect-free.
+```

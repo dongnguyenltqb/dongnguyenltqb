@@ -1,0 +1,224 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "January 8, 2020",
+  slug: "/blog/go-app-deploy",
+  title: "Chạy ứng dụng Go trên Server",
+  description: "",
+}
+
+export default Post(meta)
+
+Hào hứng sau khi viết xong một app với go, việc tiếp theo cần làm là chạy ứng dụng đó trên server, hôm nay mình xin được chia sẻ hai các mà mình thường dùng khi chạy go app
+
+- Chaỵ ứng dụng với **systemd service**.
+- Chạy ứng dụng trong **docker container**.
+
+![img](https://miro.medium.com/max/2988/1*YOH89IYGnmOZ9NX-tD7nuQ.png)
+
+# Chạy ứng dụng với systemd service.
+
+Nói sơ qua một chút về systemd, systemd là một chương trình quản lí các ứng dụng trong linux, tất cả các ứng dụng được quản lí bởi systemd đều được chạy dưới dạng daemon( chữ d trong systemd đón ^\_^ ) và được quản lí bằng file cấu hình ( được gọi là unix file ) có 12 loại unix file
+
+- service (các file quản lý hoạt động của 1 số chương trình)
+- socket (quản lý các kết nối)
+- device (quản lý thiết bị)
+- mount (gắn thiết bị)
+- automount (tự đống gắn thiết bị)
+- swap (vùng không gian bộ nhớ trên đĩa cứng)
+- target (quản lý tạo liên kết)
+- path (quản lý các đường dẫn)
+- timer (dùng cho cron-job để lập lịch)
+- snapshot (sao lưu)
+- slice (dùng cho quản lý tiến trình)
+- scope (quy định không gian hoạt động)
+
+Service là loại phổ biến và được dùng nhiều, nhất trong phần này mình sẽ dùng service unix file để setup các thông số cho app cuả mình.
+
+Nói sơ qua một chúng mình sẽ build app ra binary sau đó sẽ tiến hành đăng kí app với systemd service. Và khởi chạy nó, repository mình để ở [đây](https://bitbucket.org/dongnguyenltqb/godemo/).
+
+![img](https://miro.medium.com/max/3396/1*CHbZEUjSyQDt3F0gcEomNw.png)
+
+Sau khi build app mình được file binary là “godemo". Mình sẽ tạo file service cho app và đăng kí app với systemd service.
+
+Mình tạo một file trong “/lib/systemd/system/” với nội dung như sau.
+
+```
+[Unit]
+Description=demo app go chay voi systemd
+ConditionPathExists=/home/bitnami/go/src/github.com/dongnguyenltqb/godemo
+After=network.target vasd.service
+
+[Service]
+Type=simple
+User=bitnami
+LimitNOFILE=1024
+
+Restart=on-failure
+RestartSec=10
+
+WorkingDirectory=/home/bitnami/go/src/github.com/dongnguyenltqb/godemo
+ExecStart=/home/bitnami/go/src/github.com/dongnguyenltqb/godemo/godemo
+
+# make sure log directory exists and owned by syslog
+PermissionsStartOnly=true
+ExecStartPre=/bin/mkdir -p /var/log/godemo
+ExecStartPre=/bin/chown syslog:adm /var/log/godemo
+ExecStartPre=/bin/chmod 755 /var/log/godemo
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=godemo
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Nói sơ qua về nội dung của file.
+
+- Phần Unit mình khai báo Description của go app , ConditionPathExists là điều kiện là thư mục với path đó có tồn tại thì mới chạy app và sau cùng After có nghĩa là app của mình sẽ chạy sau khi network service sẵn sằng.
+- Phần Service, mình có khai báo WorkingDirectory và ExecStart là nơi mà Go App sẽ làm việc và file sẽ được chạy phải đúng là file “exec start" chỉ định. Khai báo “ Restart=on-failure” + “RestartSec=10” thì app sẽ tự khởi chạy là sau 10s nếu lần chạy trước fail.
+
+Để tiến hành đăng kí app của mình với systemd service mình chạy lệnh
+
+```
+sudo systemctl enable godemo.service
+```
+
+Output như sau.
+
+![img](https://miro.medium.com/max/3988/1*548bBrkk7nWt8I5a1zCtKA.png)
+
+Như vậy là mình đã đăng kí thành công app với systemd service.
+
+Để tiến hành chạy app mình chạy lệnh. Và mình không nhận được output gì cả, chỉ là lệnh đã thực thi thành công.
+
+```
+sudo systemctl start godemo
+```
+
+Để kiểm tra tình trang app mình dùng lệnh. Và mình nhận được kết quả sau.
+
+![img](https://miro.medium.com/max/3724/1*sRj6N_ZznPsSjI600GE7mA.png)
+
+Vậy là app của mình đã không thể chạy được, do không qua được kiểm ConditionPathExists,check kĩ lại đúng ra phải là “bitbucket.org' thay cho ‘github.com' mình tiến hành chỉnh sửa lại file và chạy lại. Do mình mới sửa file godemo.service nên mình phải tiến hành đăng kí mới file và sau đó lại start nó, sau đó sẽ kiểm tra tình trạng app.
+
+```
+sudo systemctl enable godemo.service
+sudo systemctl start godemo.service
+sudo systemctl status godemo.service
+```
+
+Và đây là Ouput mình nhận được. Mình thấy log của gin-web-server và điều đó chứng tỏ là app của mình đã chạy ngon lành.
+
+![img](https://miro.medium.com/max/5100/1*4b_6lKMx_F7oiR4uPBdrQQ.png)
+
+Và để tiến hành xem realtime log mình dùng công cụ “journalctl”
+
+```
+sudo journalctl -f -u godemo
+```
+
+Mình tiến hàng gửi vài request và xem log có đang hoạt động tốt không và đây là kết quả.
+
+![img](https://miro.medium.com/max/3036/1*G9k-noF2KPSQnfCk9qC_JQ.png)
+
+![img](https://miro.medium.com/max/4488/1*FMbHNOrFgayRRGJyc1zjaw.png)
+
+Vậy là app của mình đã chạy dưới với systemd service rồi. Với kiểu chạy này, mình thường hay triển khai như sau.
+
+![img](https://miro.medium.com/max/60/1*4wfcy5G4zsYR4AHqObsvLQ.png?q=20)
+
+![img](https://miro.medium.com/max/2824/1*4wfcy5G4zsYR4AHqObsvLQ.png)
+
+Nội dung của file deploy.sh
+
+![img](https://miro.medium.com/max/2412/1*5lXJ7tJrlykBwPAh3nghzQ.png)
+
+Mỗi khi mình push 1 commit lên nhánh master, bitbucket sẽ chạy pipelines và nội dung mình sẽ chạy là chạy các lệnh để pull và merge code từ nhánh master về, sau đó build app và start lại app với systemd service, để start app các bạn chỉ cần chạy lệnh.
+
+```
+sudo systemctl restart godemo
+```
+
+Vậy là xong cách một, à để tìm hiểu sâu hơn về systemd các bạn có thể tìm hiểu thêm tại [**đây**](https://www.digitalocean.com/community/tutorials/understanding-systemd-units-and-unit-files)**.** Tiếp theo là các 2 chạy go app trong docker container.
+
+# Chạy ứng dụng trong Docker Container.
+
+Trước hết,mình giới thiệu qua một chút về docker.
+
+Nếu ngày xưa câu chuyện “code work on my machine" khiến bao developer phải học máu thì ngày nay nó có phức tạp hơn khi code không chỉ phải chạy được trên “my machine” phải còn phải “ run on every enviroment”.
+
+![img](https://miro.medium.com/max/518/1*INK9EuWXCm_SlLjcdIiQvQ.png)
+
+Và Docker được tạo ra để giải quyết vấn đề đó, tránh confic giữa các app khi chạy, mỗi app sẽ được wrap trong 1 cái container và giao tiếp với bên ngoài thông qua network port. N app thì sẽ chạy trong N container và từ đó sẽ tránh được xung đột không lường trước ( nếu mà lường trước được hết thì đã không đẻ ra thằng Docker ^-^ ).
+
+Để tìm hiểu về Docker các bạn có thể ghé trang chủ của nó [**\*https://www.docker.com/why-docker\***](https://www.docker.com/why-docker)
+
+Mình đi vào phần 2 của mình đây :D
+
+Trước hết để chạy ứng dụng của bạn trong docker container bạn phải build image và tạo một container trên image đó và tiếp theo là chaỵ container đó .
+
+Docker build image dựa vào “Dockerfile" các bạn cùng xem qua nội dung file.
+
+![img](https://miro.medium.com/max/1936/1*NjXfDXEtC-kb_FoLYVE84w.png)
+
+Ở đây
+
+- **FROM** : chỉ đỉnh image của mình khi được tạo nó sẽ dựa trên image có sẵn của golang bản (latest)
+- **WORKDIR** : đây là folder mà app của mình sẽ làm việc.
+- **COPY . .** : đây là lệnh COPY tất cả các file trong thư mục hiện tại vào trong WORKDIR của container.
+- [**RUN**](https://www.docker.com/why-docker) : hai lệnh RUN trên sẽ được chạy lần lượt trong khi create image. sơ qua thì mình sẽ chạy đến workdir và build file của mình.
+- **EXPOSE** : đây là lệnh mở port để giao tiếp với thế giới bên ngoài, vì nó là container khép kinh nên phải có một cái lỗ gì đó để thông với bên ngoài và trường hợp này là mình mở PORT 8080 trên container xD
+- **CMD** : đây là lệnh sẽ được thực thi khai mình thực hiện “start container" tức là chạy container. Phía trên thì khi chạy container mình sẽ khởi chaỵ app đã được build.
+
+Thưc hành cùng mình nhé.
+
+1. Để build image mình chạy đến folder của app và tiến hàng chạy lệnh và mình nhận được output
+
+```
+docker build -t godemo-image .
+```
+
+![img](https://miro.medium.com/max/2856/1*uoT8GwkfleBSQTt3kKR5Ew.png)
+
+Vậy là mình đã build thành công image, mình tiến hành kiểm tra xem có bao nhiêu image đang tồn tại bằng lệnh.
+
+```
+docker image ls
+```
+
+![img](https://miro.medium.com/max/3064/1*AAAW5c_6yz0qXIgsDjbg2w.png)
+
+Như hình trên thì image của mình đã nằm trong kho image.
+
+Để tiến hành tạo một container và chạy container mình dùng lệnh dưới, lệnh dưới sẽ tiến hành chạy docker-container theo kiểu “daemon” hay “background", map port 6666 thông với port 8080 của container, đặt tên cho container là “demo-golang-docker” và tạo container dựa trên image có tên là “godemo-image" mình đã tạo ở trên kia.
+
+```
+docker run -d -p 6666:8080 --name demo-golang-docker demogo-image
+```
+
+Mình chạy lênh và nhận được id đang chaỵ của container.
+
+![img](https://miro.medium.com/max/3872/1*ns3_9Tt9rc8-jx6kNanssg.png)
+
+Và để kiểm tra status cũng như log realtime của app đang chạy trong container mình dùng lệnh.
+
+```
+docker logs -f demo-golang-docker
+```
+
+Và nhận được output như sau, chứng tỏ app mình đã chạy trong container ngon lành.
+
+![img](https://miro.medium.com/max/3584/1*3Q7Y3GPRSrO_ri84DVe3xA.png)
+
+Và để check xem docker có map được port 6666 thông với 8080 không mình tiến hành gửi một GET REQUEST tới cổng 6666 và xem kết quả.
+
+![img](https://miro.medium.com/max/2620/1*TmIiHSohf_PdymT_LGZZ3g.png)
+
+Vậy là app của mình đã giao tiếp được với thế giới bên ngoài. @\_@
+
+---
+
+Trên đây mình đã giới thiệu với các bạn 2 cách mình hay dùng để triển khai Go Application trên server, nếu có sai sót chỗ nào xin được các bạn comment để mình sửa đổi, nếu các bạn có cách nào hay hơn xin hãy comment để mình cùng học hỏi và trở nên tốt hơn.
+
+Đến đây mình xin dừng bút, và cảm ơn các bạn đã đọc bài viết. Hẹn gặp lại các bạn trong các bài viết sau.

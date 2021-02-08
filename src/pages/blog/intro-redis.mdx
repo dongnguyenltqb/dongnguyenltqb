@@ -1,0 +1,79 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "December 28, 2019",
+  slug: "/blog/intro-redis",
+  title: "Giới thiệu về Redis",
+  description: "",
+}
+
+export default Post(meta)
+
+![img](https://miro.medium.com/max/2400/1*9_5t7dREEWPPxoAjVAY2lg.png)
+
+Trước khi nói tới redis, phải nói từ việc caching là và tầm quan trọng của caching.
+
+Bình thường, cứ mỗi yêu cầu từ phía client, hầu hết trong chúng ta ai cũng chạy vào database query thứ gì đó, sau đó làm vài việc rồi lại trả về kết quả cho client. Chuyện này vẫn bình thường cho tới khi số lượng request tăng lên đáng kể khiến CPU và Hard Disk gồng mình ra làm đi làm lại mãi cùng một việc, lấy data rồi lại trả về, thậm chí có những thứ đã lấy lần trước rồi tính toán xong xuôi rồi, biết kết quả rồi vẫn phải đi làm lại, thậm chí làm lại hàng ngìn lần.
+
+Và để tránh giải quyết trường hợp đó, caching xuất hiện như là một phương tiện giúp server ghi nhớ kết quả của quá trình tính toán, để trả về nhanh hơn cho những lần request tương tự của client trong tương lai.
+
+Redis là một công cụ hỗ trợ server giải quyết bài toán caching, không những vậy Redis có thể được sử dụng như một database được lưu trữ trong ram để tăng tốc độ xử lí, nhưng đó cũng là một nhược điểm của Redis, khi mà cúp điện đồng nghĩa với mất dữ liệu, mặc dù redis có hỗ trợ backup và restore data từ ổ cứng theo chu kì và điều đó là không hoàn hảo. Cẩn thận thì là tốt nhất : D
+
+Redis hỗ trợ lưu data dưới dạng Key Value, value đó có thể là một chuỗi, số, danh sách, danh sách được sắp xếp hay thậm chí là một tài liệu dạng từ điển (hash).
+
+## Vậy chúng ta sẽ sử dụng Redis để caching data như thế nào ?
+
+Bạn có thể dùng redis để caching mọi thứ bạn muốn, từ kết quả của một câu query trong database, một profile của user, profile cửa hàng. Và khi cache phải chắc chẵn những gì được cache là mới nhất vì nếu data cũ thì sẽ rất ảnh hưởng đến client.
+
+Redis hỗ trợ Transaction, hỗ trợ Pub/Sub vì vậy nó cũng được sử dụng làm hệ thống Message Broker, kinh điển là RabbitMQ sử dụng Redis là core của hệ thống.
+
+![img](https://miro.medium.com/max/60/1*ibn2DlR4FkrSgkR5gOVKLg.png?q=20)
+
+![img](https://miro.medium.com/max/1880/1*ibn2DlR4FkrSgkR5gOVKLg.png)
+
+**Thử cache thứ gì đó với Redis.**
+
+Ví dụ như mình, mình có một web app cho user sử dụng để upload ảnh, tạo ảnh thumbnail những mình chỉ cho phép user sử dụng sau khi Login bằng account hợp lệ của Google.
+
+Và khi user Login thành công, mình sẽ xem trong database có thông tin User hay không nếu không thì sẽ tạo mới, tiếp theo mình sẽ cache luôn profile của user dựa vào email, và sau này khi user login mình sẽ lấy thẳng trong Redis luôn, nhanh hơn so với việc chui vào Database để lấy.
+
+![img](https://miro.medium.com/max/1912/1*yDsDrktxZLuca0Zu-vNIKg.png)
+
+Các bạn thấy đấy mình đã dùng kiểu “key-value" để cache nguyên object profile của user dưới dạng string. Và sau này khi client gọi lên để lấy profile user thì mình chỉ chần chui vào ram lấy, nếu lấy không được chỉ có trường hợp user đó chưa login thôi :D
+
+![img](https://miro.medium.com/max/2532/1*7DVzJRkypKLpMeWutnNmfQ.png)
+
+Ngoài ra do cũng hộ trợ Transaction nên dữ liệu của Redis luôn được đảm bảo là được sửa đổi chính xác, các bạn có thể đọc trong bài viết [**này**](https://medium.com/@nguynhung/rate-limiting-with-go-and-redis-1684b70df088) của mình, mình đã sử dụng Redis làm nơi lưu trữ số lượng request từ client sau đó thì chặn nếu request được thực thi một cách không hợp lệ.
+
+Hay là một ví dụ, mình cần lên thực đơn đồ ăn món uống do công ty bình chọn cho ngày hôm nay, bởi vì thông tin chỉ được thay đổi cỡ 1 lần 1 ngày, nên mình sẽ chuẩn bị trước tất cả, query lấy hết thông tin món ăn, cửa hàng bán loại món này lưu sẵn vào Redis và qua ngày mới, nếu có hàng ngìn người cùng lấy thông tin thì cũng sẽ rất nhanh vì đã có sẵn rồi.
+
+Nói qua vậy là đủ bây giờ mình sẽ hướng dẫn các bạn Setup một Redis server trên Ubuntu theo kiểu mì ăn liền để test xem nó có gì hay.
+
+Trước tiên chạy lên này. Nó sẽ cài đặt redis-server và redis-cli cho bạn, redis-cli là công cụ giúp bạn giao tiếp với redis-server và thao tác với redis database.
+
+```
+sudo apt-get install redis-server
+```
+
+Để tiến hành chạy Redis Server từ terminal bạn gõ “redis-server" nếu kết quả được như trên thì đã có server để Test.
+
+![img](https://miro.medium.com/max/4716/1*c-9fObBIQ5sn689XKwIY3g.png)
+
+Đã có server chạy, mặc định redis server sẽ lắng nghe trên cổng 6379 bạn có thể chỉnh sửa bằng cách cấu hình các thông số trong file config. Mặc định thì sẽ nằm tại “ /etc/redis/redis.conf”. Nếu không có thì các bạn có thể tạo mới và tìm hiểu các thông số tại [đây](https://redis.io/topics/config).
+
+Tiếp theo mình sẽ dùng “redis-cli" để kết nối với “redis-server" chỉ cần chạy “redis-cli" thì mặc định nó sẽ kết nối đến “locahost:6379”. Mình sẽ dùng lệnh “ping" xem có nhận được gì không, nếu kết nối thành công thì server sẽ “pong". Như hình dưới.
+
+![img](https://miro.medium.com/max/2404/1*Q4uHl49TdSPbl2TeNbE1HA.png)
+
+Mình chạy một vài command. Khá đơn giản, để xem full command và các kiểu dữ liệu trong redis các bạn có thể tham khảo qua bảng[ cheet-sheet](http://cheatography.com/tasjaevan/cheat-sheets/redis/) này.
+Nhưng trong hình mình tiến hành ghi vào database một biến có tên là user_393901228 với kiểu dữ liệu là hash, và sau đó setup lại giá trị rồi lại lấy ra.
+
+![img](https://miro.medium.com/max/3836/1*-dYcpRKxDcCBABAui1NpdA.png)
+
+Sau này nếu có điều kiên, đối mặt với lượng request lớn mình sẽ áp dụng redis thường xuyên để cache, hoặc là làm database cho thứ gì đó, và nếu có điều gì hay mình sẽ viết tiếp.
+
+Mình xin dùng bút tại đây, à quên dừng gõ phím :V cảm ơn các bạn đã xem qua bài.
+
+![img](https://miro.medium.com/max/756/1*c-Wz8dcjnMbYVw-00EsRLg.png)
+
+Happy Coding :D

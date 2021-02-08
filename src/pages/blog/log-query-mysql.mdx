@@ -1,0 +1,85 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "March 21, 2020",
+  slug: "/blog/log-query-mysql",
+  title: "Log MySQL Query",
+  description: "",
+}
+
+export default Post(meta)
+
+Đôi khi bạn sẽ cần monitor tất cả các query được gửi tới server trong một khoảng thời gian, mysql cung cấp cho ta vài phương pháp để làm chuyện này, cho phép chúng ta xem log của các query và log của các query chậm. Nếu ta kích hoạt tính năng log query thì những log được tạo sẽ sẽ nằm ở một tront hai chỗ file hoặc 2 bảng `general_log` và `slow_log` của database có tên là `mysql`.
+
+1. **Đầu tiên, kiểm tra nếu database mysql chưa có hai bảng sau slow_log và general_log thì tạo nó.**
+
+   - Để tạo bảng `general_log`
+
+   ```sql
+    CREATE TABLE `general_log` (
+      `event_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+                             ON UPDATE CURRENT_TIMESTAMP,
+      `user_host` mediumtext NOT NULL,
+      `tread_id` bigint(21) unsigned NOT NULL,
+      `server_id` int(10) unsigned NOT NULL,
+      `command_type` varchar(64) NOT NULL,
+      `argument` mediumtext NOT NULL
+     ) ENGINE=CSV DEFAULT CHARSET=utf8 COMMENT='General log'
+   ```
+
+   Bảng `genera_log` là một bản ghi ghi lại những gì mysqld đã làm, mysql server ghi thông tin đến log này khi client kết nối hay ngắt kết nối, log lại mỗi câu truy vấn nhận được từ client. Log này rất hữu dụng khi bạn nghi ngờ có sự sai sót trong truy vấn và muốn truy được client nào đã gửi truy vấn tới.
+
+   - Và để tạo bảng `slow_log`
+
+   ```sql
+   CREATE TABLE `slow_log` (
+      `start_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+                             ON UPDATE CURRENT_TIMESTAMP,
+      `user_host` mediumtext NOT NULL,
+      `query_time` time NOT NULL,
+      `lock_time` time NOT NULL,
+      `rows_sent` int(11) NOT NULL,
+      `rows_examined` int(11) NOT NULL,
+      `db` varchar(512) NOT NULL,
+      `last_insert_id` int(11) NOT NULL,
+      `insert_id` int(11) NOT NULL,
+      `server_id` int(10) unsigned NOT NULL,
+      `sql_text` mediumtext NOT NULL,
+      `thread_id` bigint(21) unsigned NOT NULL
+     ) ENGINE=CSV DEFAULT CHARSET=utf8 COMMENT='Slow log'
+   ```
+
+   Log này lưu lại nhưng câu query mất nhiều thời gian để hoàn thành, bao lâu là lâu được định nghĩa ở biến `long_query_time`, giá trị mặc định là 10s, slow_log rất quan trọng trong việc xác định query để tối ưu hóa hóa, nhầm tăng hiệu suất của hệ thống.
+
+2. **Mở tính năng ghi nhật kí log trên database**
+
+```sql
+ set global log_output = 'table';
+ set global general_log = 1;
+ set global slow_query_log = 1;
+```
+
+3. **Định ngĩa thế nào là slow query**
+
+```sql
+# Mình set 1s là lâu
+set global long_query_time = 1;
+```
+
+4. **Bây giờ để xem log bạn có thể dùng query này.**
+
+```sql
+select * from mysql.general_log;
+select * from mysql.slow_log;
+```
+
+5. **Nếu bạn muốn tắt log query vào table**
+
+```sql
+set global general_log = 0;
+set global slow_query_log = 0;
+```
+
+---
+
+Nguồn : [TablePlus](https://tableplus.com/blog/2018/10/how-to-show-queries-log-in-mysql.html)

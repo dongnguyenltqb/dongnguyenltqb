@@ -1,0 +1,349 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "March 13, 2020",
+  slug: "/blog/docker-compose-basic",
+  title: "Docker compose cơ bản.",
+  description: "",
+}
+
+export default Post(meta)
+
+Docker compose được giới thiệu là một công cụ cho phép bạn định nghĩa và chạy nhiều docker container, với Compose bạn sử dụng file yaml để định nghĩa cấu trúc các service của app, sau đó với chỉ một command, bạn tạo và khởi chạy tất cả các service bạn đã cấu hình.
+
+Sử dụng Compose cơ bản qua ba bước
+
+1. Xác định app environment với Dockerfile.
+2. Định nghĩa các service bằng file **docker-compose.yml**
+3. Chạy **docker-compose up** để khởi tạo và chạy toàn bộ app
+
+Một docker-compose.yaml đơn giản trông giống thế này.
+
+```yaml
+version: "3"
+services:
+  app:
+    build: .
+    ports:
+      - "1234:8888"
+  mongo1:
+    image: mongo
+    container_name: mongo1
+    environment:
+      - MONGO_INITDB_DATABASE=bar
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=123
+    ports:
+      - "27777:27017"
+    volumes:
+      - "mongo-volume:/data/db"
+      - ./mongo1/mongo1-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+volumes:
+  mongo-volume:
+```
+
+Ở file trên ta có 3 phần, phần 1 chỉ version của Compose file đang sử dụng, phần hai định nghĩa các service và phần ba chỉ ra các volume mà compose sử dụng.
+
+Ở phần service ta có 2 service là go app và mongo1
+
+# mongo1
+
+```yaml
+mongo1:
+  image: mongo
+  container_name: mongo1
+  environment:
+    - MONGO_INITDB_DATABASE=bar
+    - MONGO_INITDB_ROOT_USERNAME=root
+    - MONGO_INITDB_ROOT_PASSWORD=123
+  ports:
+    - "27777:27017"
+  volumes:
+    - "mongo-volume:/data/db"
+    - ./mongo1/mongo1-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+```
+
+ở trên ta định nghĩa tên image, container_name, port được thông với thế giới bên ngoài và volume mà mongo1 sử dụng, ngoài ra có điểm đặc biệt là trong mình map một file **mongo1-init.js** vào trong container, mục đích là khi mongo1 khởi chạy nó sẽ create **user** và **password** cho database **bar.** Nội dung file **mongo1-init.js** như sau.
+
+```javascript
+db.createUser({
+  user: "docker",
+  pwd: "123456",
+  roles: [
+    {
+      role: "readWrite",
+      db: "bar",
+    },
+  ],
+})
+```
+
+# go app
+
+```yaml
+app:
+  build: .
+  ports:
+    - "1234:8888"
+```
+
+ở trên định nghĩa các build app và cổng được map vào khi container được chạy, go app được build bằng Dockerfile trong cùng folder.
+
+nội dung của Dockerfile để build go app image.
+
+```yaml
+FROM golang:alpine AS builder
+RUN apk update && apk add --no-cache git
+ENV USER=appuser
+ENV UID=100001
+RUN adduser \
+--disabled-password \
+--gecos "" \
+--home "/whereever" \
+--shell "/sbin/nologin" \
+--no-create-home \
+--uid "${UID}" \
+"${USER}"
+WORKDIR /app
+COPY . .
+RUN go mod download
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o /app/go_binary_app
+FROM scratch
+COPY --from=builder /etc/passwd /etc/passwd
+COPY --from=builder /etc/group /etc/group
+COPY --from=builder /app/go_binary_app /app/go_binary_app
+USER appuser:appuser
+EXPOSE 8081 8888
+```
+
+Ở đây mình sử dụng một image **golang:alpine** để build ra binary, tạo một **user** để go app chạy dưới tên user đó, và sau đó dùng image **scratch** để copy file binary và 2 file là **/etc/passwd** và **/etc/group** qua image mới **expose** hai cổng **8081 8888** trên image mới này và chỉ ra **ENTRYPOINT** khi khởi chạy container.
+Mục đích của việc trên là giảm **kích thước file image** của go app.
+
+- Nội dung của file **main.go**
+
+```go
+func main() {
+	go func() {
+		client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://docker:123456@mongo1:27017/bar"))
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		if err = client.Connect(context.Background()); err != nil {
+			fmt.Println(err)
+			return
+		}
+		collection := client.Database("bar").Collection("fool")
+		for {
+			time.Sleep(time.Second)
+			if _, err = collection.InsertOne(context.Background(), bson.M{
+				"time": time.Now().String(),
+			}); err != nil {
+				fmt.Println(err)
+			}
+		}
+	}()
+	fmt.Println("vim-go")
+	app := gin.Default()
+	app.GET("/", func(c *gin.Context) {
+		c.String(http.StatusOK, time.Now().String())
+	})
+	app.Run(":8888")
+}
+```
+
+Nó sẽ kết nối với mongo1 với hostname, user và password mình đã set trong “mongo1-init.js”, cứ một giây thì ghi vào database một lần.
+
+Sau đó tạo một webserver và lắng nghe trên cổng 8888 trong container.
+
+---
+
+Sau khi định ngĩa hai services trong app thì mình có thể build và khởi chạy bằng lệnh.
+
+```
+docker-compose up --build
+```
+
+```
+➜  cptest docker-compose up --build
+Building app
+Step 1/16 : FROM golang:alpine AS builder
+ ---> 51e47ee4db58
+Step 2/16 : RUN apk update && apk add --no-cache git
+ ---> Running in 9c34a2445eef
+fetch http://dl-cdn.alpinelinux.org/alpine/v3.11/main/x86_64/APKINDEX.tar.gz
+fetch http://dl-cdn.alpinelinux.org/alpine/v3.11/community/x86_64/APKINDEX.tar.gz
+v3.11.3-120-g02b0001e98 [http://dl-cdn.alpinelinux.org/alpine/v3.11/main]
+v3.11.3-122-g82e6adffb8 [http://dl-cdn.alpinelinux.org/alpine/v3.11/community]
+OK: 11269 distinct packages available
+fetch http://dl-cdn.alpinelinux.org/alpine/v3.11/main/x86_64/APKINDEX.tar.gz
+fetch http://dl-cdn.alpinelinux.org/alpine/v3.11/community/x86_64/APKINDEX.tar.gz
+(1/5) Installing nghttp2-libs (1.40.0-r0)
+(2/5) Installing libcurl (7.67.0-r0)
+(3/5) Installing expat (2.2.9-r1)
+(4/5) Installing pcre2 (10.34-r1)
+(5/5) Installing git (2.24.1-r0)
+Executing busybox-1.31.1-r9.trigger
+OK: 22 MiB in 20 packages
+Removing intermediate container 9c34a2445eef
+ ---> cd03a3e50a3f
+Step 3/16 : ENV USER=appuser
+ ---> Running in b9433fb124b1
+Removing intermediate container b9433fb124b1
+ ---> bd612b10e4f6
+Step 4/16 : ENV UID=100001
+ ---> Running in 2270b301d3a5
+Removing intermediate container 2270b301d3a5
+ ---> f9f0d98f78cc
+Step 5/16 : RUN adduser         --disabled-password         --gecos ""         --home "/whereever"         --shell "/sbin/nologin"         --no-create-home         --uid "${UID}"         "${USER}"
+ ---> Running in ac532872128f
+Removing intermediate container ac532872128f
+ ---> 4cd33f7a81b9
+Step 6/16 : WORKDIR /app
+ ---> Running in 3583e35a5856
+Removing intermediate container 3583e35a5856
+ ---> 195a624585d3
+Step 7/16 : COPY . .
+ ---> 88d176e6f33c
+Step 8/16 : RUN go mod download
+ ---> Running in 03b80dc9e857
+Removing intermediate container 03b80dc9e857
+ ---> bc40e3dc9036
+Step 9/16 : RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o /app/go_binary_app
+ ---> Running in 70e9c6f544a4
+Removing intermediate container 70e9c6f544a4
+ ---> 19d61964268b
+Step 10/16 : FROM scratch
+ --->
+Step 11/16 : COPY --from=builder /etc/passwd /etc/passwd
+ ---> 709b342100cc
+Step 12/16 : COPY --from=builder /etc/group /etc/group
+ ---> 5d7e51535e0d
+Step 13/16 : COPY --from=builder /app/go_binary_app /app/go_binary_app
+ ---> e080a61d79b8
+Step 14/16 : USER appuser:appuser
+ ---> Running in c30fa817136e
+Removing intermediate container c30fa817136e
+ ---> 5cfc7cb5f43c
+Step 15/16 : EXPOSE 8081 8888
+ ---> Running in f1b05b8d8ac4
+Removing intermediate container f1b05b8d8ac4
+ ---> 448952ba410f
+Step 16/16 : ENTRYPOINT ["/app/go_binary_app"]
+ ---> Running in 870a90610ceb
+Removing intermediate container 870a90610ceb
+ ---> 1923e5557195
+Successfully built 1923e5557195
+Successfully tagged cptest_app:latest
+Creating cptest_app_1 ... done
+Creating mongo1       ... done
+```
+
+Để kiểm tra xem hai container đã thông với thế giới bên ngoài chưa, mình gửi request đến hai cổng đã được map vào. Và nó đã thông với thế giới bên ngoài.
+
+```
+➜  ~ curl localhost:1234
+2020-03-13 12:06:07.6935101 +0000 UTC m=+161.255694401%
+➜  ~ curl localhost:27777
+It looks like you are trying to access MongoDB over HTTP on the native driver port.
+➜  ~
+```
+
+Và để kiểm tra xem go app có kết nối được với mongo1 hay không, vì do lúc nãy mình quên in ra màn hình khi nó write nên mình sẽ chui vào container mongo1 và xem nó có gì không
+
+```
+➜  cptest docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                              NAMES
+43138144608e        mongo               "docker-entrypoint.s…"   8 minutes ago       Up 8 minutes        0.0.0.0:27777->27017/tcp           mongo1
+26faf2244c66        cptest_app          "/app/go_binary_app"     8 minutes ago       Up 8 minutes        8081/tcp, 0.0.0.0:1234->8888/tcp   cptest_app_1
+➜  cptest docker exec -it 43138144608e bash
+root@43138144608e:/#
+```
+
+Mình kết nối đến mongo1 xong list các database và collection đang có, đếm xem có bao nhiêu docs đã được ghi, tìm một doc bất kì
+
+```
+root@43138144608e:/# mongo "mongodb://docker:123456@mongo1:27017/bar"
+MongoDB shell version v4.2.3
+connecting to: mongodb://mongo1:27017/bar?compressors=disabled&gssapiServiceName=mongodb
+Implicit session: session { "id" : UUID("1cee9636-f024-4162-bd5b-260111ca8d62") }
+MongoDB server version: 4.2.3
+Welcome to the MongoDB shell.
+For interactive help, type "help".
+For more comprehensive documentation, see
+ http://docs.mongodb.org/
+Questions? Try the support group
+ http://groups.google.com/group/mongodb-user
+
+> show dbs;
+bar  0.000GB
+
+> use bar
+switched to db bar
+
+> show collections
+fool
+
+> db.fool.count({})
+860
+
+> db.fool.findOne({})
+{
+ "_id" : ObjectId("5e69a81d3c4816cc7998311c"),
+ "time" : "2020-03-12 03:10:21.6948089 +0000 UTC m=+1.008459201"
+}
+>
+```
+
+Vậy thì con app của mình đã kết nối thành công đến con mongo1, và hai con service trên đều có thể giao tiếp với thế giới bên ngoài qua hai cổng đã được map vào.
+
+Để stop các container thì chỉ cần nhấn tổ hợp lệnh “**command + c**” hoặc dùng lệnh “**docker-compose stop**”
+
+```
+➜  cptest docker-compose stop
+Stopping mongo1       ... done
+Stopping cptest_app_1 ... done
+➜  cptest
+```
+
+khi nào muốn start lại thì “**docker-compose start”** sở dĩ không có flag “ — build” vì lúc nãy mình chưa build nên mới cần build còn build rồi thì thôi
+
+Kiểm tra các container đang chạy thì cả hai đang chạy.
+
+```
+➜  cptest docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                              NAMES
+43138144608e        mongo               "docker-entrypoint.s…"   16 minutes ago      Up About a minute   0.0.0.0:27777->27017/tcp           mongo1
+26faf2244c66        cptest_app          "/app/go_binary_app"     16 minutes ago      Up About a minute   8081/tcp, 0.0.0.0:1234->8888/tcp   cptest_app_1
+➜  cptest
+```
+
+Kiểm tra các image đã build
+
+![img](https://miro.medium.com/max/1872/1*Kidufgb_mqdAM70ZeC9UOQ.png)
+
+image **cptest_app** nhẹ chỉ có 15.6mb, ngoài ra có tồn tại một image "none" là cái image mà ta đã tạm dùng để build ra go binary và sau đó không dùng nó nữa, để lại của phí ổ cứng nên mình sẽ xóa nó
+
+```
+➜  cptest docker image rm 19d61964268b
+Deleted: sha256:19d61964268bde72d8e92c14837ec54d576a6f2bed40cdd5155780bccee5447e
+Deleted: sha256:42335cda1829330df2403bec0f1fb022ae70795d524609100ef39074439d9f40
+Deleted: sha256:bc40e3dc903694971813ef323f89231dbfd4876731d7653f8336054cf14dbc12
+Deleted: sha256:9a35c0844f3803adbee37abd4c421f1dd9d1d29697802b79a9367546ee955102
+Deleted: sha256:88d176e6f33c5edae478c3c7ec54f51da6ab89f6a7c5e842bfd355bf6b415520
+Deleted: sha256:12eef73431076a335e063d0c0bb98acce06bcedd3f04be4e5211022f17eb3abd
+Deleted: sha256:195a624585d372bd74f2779ec43290859209511e5cac40cce974354c35e9c628
+Deleted: sha256:78beb847ad581e21eabdff4efec8b15032a38f968f1eb728526b5cac8a45a9e3
+Deleted: sha256:4cd33f7a81b98fab7c34588dcea3a1a90030de4cb2cc27655b5dec9927010432
+Deleted: sha256:ce3d74ae3aba686af9c65f9e77baa6125bbd7fc2ca6b1998ea3f68a0325a93e1
+Deleted: sha256:f9f0d98f78ccedef2398f60073b4c03c1671f982aec9ddb0296f5a7d0087bc5b
+Deleted: sha256:bd612b10e4f63eb2a46726f106c167423e4bee11f433c7ccf55dedd2a8cf57c4
+Deleted: sha256:cd03a3e50a3fd79c78faf3cefe817d30ddb343851c8f33574c2b50cdc85ee071
+Deleted: sha256:5c500926f351b7410a8215ec23dd9c3499cff025dd9bc9eb9ae6c2ddd7c76efa
+➜  cptest
+```
+
+---
+
+Tổng kết lại, ở trong bài viết này mình đã sử dụng cơ bản docker-compose, dùng docker-compose khởi chạy 2 service cùng nhau, hi vọng trong tương lai khi vọc vạch được nhiều thì mình sẽ chia sẻ nhiều hơn với các bạn. Cảm ơn các bạn đã đọc bài.
+\#happyCoding

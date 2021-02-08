@@ -1,0 +1,251 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "April 14, 2020",
+  slug: "/blog/bash-script-backup-mongodb",
+  title: "Bash Script back up Mongo Database đơn giản.",
+  description: "",
+}
+
+export default Post(meta)
+
+Chả là mấy ngày nay chả làm ăn được gì, hôm qua mở cửa hàng ra bán thì quản lí thị trường cứ lòng vòng nên cũng đóng luôn, hên sao ông anh rủ làm freelancer cho một project về `academy video`, hai ngày đầu code ngon lành server chạy mượt mà, nhưng sang ngày thứ 3 không biết vì sao con `mongodb` server lại không thể truy cập được, cả bọn hoảng hốt vì chưa có một bản `backup` nào cả. Hên sao 3 tiếng sau nó lại sống lại và rồi mình được ông a giao cho cái công việc viết script backup mongo giá 300k :))
+
+Thực ra thì mình chả biết viết `bash` nhưng mà sau một vòng lội `google` thì cũng xong, yêu cầu thì cũng khá đơn giản.
+
+- Back up database có tên là `psdp` theo chu kì 1 ngày 1 lần.
+- Lưu vào `aws s3` và chỉ giữ lại 5 bản mới nhất.
+
+# Triển khai
+
+## Ý tưởng
+
+1. Đầu tiên là làm sao để `backup`
+
+Mongodb có sẳn tool `mongodump` để `backup` database, vậy thì để `backup` database `psdp` thì mình chỉ cần chạy lệnh
+
+```bash
+mongodump --uri=$URI --archive="$OUTPUT"
+```
+
+2. Làm sao để `copy` file đã `backup` sang `aws s3`
+
+Uầy, google một vòng mình thấy aws có cùng cấp `aws cli` , có hỗ trợ command `copy` qua `s3` luôn. Hướng dẫn cài đặt nằm ở [đây](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2-linux.html#cliv2-linux-install).
+
+```bash
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+```
+
+À nếu con server đó chưa cài `unzip` thì chạy lệnh `sudo apt install unzip` để cài đặt. Sau khi cài xong `aws cli` thì phải cấu hình `access key` và `secret key` cho nó.
+
+```bash
+$ aws configure
+AWS Access Key ID [None]: AKIAIOSFODNN7EXAMPLE
+AWS Secret Access Key [None]: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+Default region name [None]: us-west-2
+Default output format [None]: json
+```
+
+Vậy là xong phần setup `aws cli` , tiếp theo là `copy` cái file này qua `bucket` bên s3, giả sửa cái `bucket` đó có tên là `psdp-dev-mongo-backup` ,và cái file cần copy qua s3 là `psdp`
+
+```bash
+aws s3 cp "psdp" "s3://psdp-dev-mongo-backup"
+```
+
+Về cơ bản là đã xong, nhưng giờ làm để xóa hết mấy cái `backup` cũ chỉ giữ lại 5,6 cái.
+
+Ý tưởng đơn giản là lặp đi lặp lại đoạn code trên, cứ mỗi lần `backup` thì lưu lại tên file output đã backup vào trong một mảng, nếu số lần backup lớn hơn 5 thì ta lại xóa cái file đã cũ nhất. File đó có tền là phần tử nằm ở vị trí đầu tiên của mảng, sau khi xóa file rồi thì loại bỏ phần tử đó để cập nhật lại mảng, làm như này thì mảng sẽ luôn duy trì ở mức ≤ 5 giá trị.
+
+## Triển thôi nào.
+
+Khai báo `URI` , `BUCKETNAME` , số lần backup `i` , mảng lưu tên file output của mongodump `arr` .
+
+```bash
+URI="mongodb://admin:123@localhost:27017/psdp?authSource=admin"
+BUCKET="psdp-dev-mongo-backup"
+declare -a arr=()
+i = 0
+```
+
+Và sau đó lặp đi lặp lại thao tác.
+
+1. Tăng số lần đã backup
+
+```bash
+((i= i+1))
+echo "===== Lần thứ $i ======"
+echo "Backup PSDP NOW"echo "Time is $(date)"
+```
+
+2. Chạy lệnh `mongodump` xuất ra file, tên file có kèm dấu thời gian, tốt nhất là chuyển qua `unix time` cho ngắn gọn.
+
+```bash
+FILENAME=$(date +%s)
+mongodump --uri=$URI --archive="/home/ubuntu/mongoBackup/psdp-$FILENAME"
+echo "done => $FILENAME"
+```
+
+3. Copy file đó qua `aws s3`
+
+```bash
+aws s3 cp "psdp-$FILENAME" "s3://$BUCKET"
+echo "done => s3://$BUCKET/psdp-$FILENAME"
+```
+
+4. Thêm tên file vừa tạo vào mảng và liệt kê hiện tại có bao nhiêu file, bao gồm tên.
+
+```bash
+arr+=("psdp-$FILENAME")
+for f in ${arr[*]}
+   do
+      echo $f
+done
+```
+
+5. Kiểm tra xem nếu số lần đã `backup` mà `> 5` thì xóa đi file cũ nhất ở cả `local` và bên `s3` . Sau đó xóa phần tử đầu của mảng và cập nhật lại mảng.
+
+```bash
+if (( $i > 5 ))
+then
+   echo "delete => ${arr[0]}"
+   rm ${arr[0]}
+   echo "deleted localfile => ${arr[0]}"
+
+   file="s3://$BUCKET/${arr[0]}"
+   echo "delete on s3 => $file"
+   aws s3 rm $file
+   echo "deleted on s3"
+
+   unset arr[0]
+   arr=( "${arr[@]}" )
+fi
+```
+
+6. Sleep trong vòng 24h = 86400 giây
+
+```bash
+sleep 86400
+```
+
+Và đây là đoạn code hoàn chỉnh.
+
+```bash
+URI="mongodb://xxx:xxx@xxx:xxx/psdp?authSource=admin"
+BUCKET="xxx"
+declare -a arr=()
+i=0
+while
+        ((i= i+1))
+        echo "=============================== $i ========================================="
+        echo "Backup PSDP NOW"
+        echo "Time is $(date)"
+        FILENAME=$(date +%s)
+        mongodump --uri=$URI --archive="/home/ubuntu/mongoBackup/psdp-$FILENAME"
+        echo "done => $FILENAME"
+        echo "Copy to S3"
+        aws s3 cp "psdp-$FILENAME" "s3://$BUCKET"
+        echo "done => s3://$BUCKET/psdp-$FILENAME"
+        arr+=("psdp-$FILENAME")
+        for f in ${arr[*]}
+                do
+                        echo $f
+                done
+        if (( $i > 5 ))
+        then
+                echo "delete => ${arr[0]}"
+                rm ${arr[0]}
+                echo "deleted localfile => ${arr[0]}"
+                file="s3://$BUCKET/${arr[0]}"
+                echo "delete on s3 => $file"
+                aws s3 rm $file
+                echo "deleted on s3"
+                unset arr[0]
+                arr=( "${arr[@]}" )
+        fi
+        echo "============================================================================"
+        sleep 3600
+do :;done
+```
+
+Rồi có code rồi vậy làm sao để chạy, `nohup` xin hân hạnh tài trợ chương trình này.
+
+```bash
+nohup bash ./cronbackupmongo.bash &
+```
+
+Toàn bộ `stdout` sẽ được ghi ra `nohup.out` và để xem `output` các bạn chạy lệnh.
+
+```bash
+sudo tail -f nohup.out
+```
+
+Output sẽ tương tự như sau.
+
+```bash
+============== Lần thứ 1 ==============
+Backup PSDP NOW
+Time is Tue Apr 14 06:12:30 UTC 2020
+2020-04-14T06:12:30.358+0000 writing psdp.logs to archive '/home/ubuntu/mongoBackup/psdp-1586844750'
+2020-04-14T06:12:30.360+0000 done dumping psdp.logs (1 document)
+2020-04-14T06:12:30.382+0000 writing psdp.users to archive '/home/ubuntu/mongoBackup/psdp-1586844750'
+2020-04-14T06:12:30.383+0000 done dumping psdp.users (1 document)
+done => 1586844750
+Copy to S3
+upload: ./psdp-1586844750 to s3://psdp-dev-mongo-backup/psdp-1586844750
+done => s3://psdp-dev-mongo-backup/psdp-1586844750
+psdp-1586844750
+====================================================================
+```
+
+Và khi đến lần thứ `6` thì nó sẽ delete file cũ.
+
+```bash
+===================== Lần thứ 6 ==========================
+Backup PSDP NOW
+Time is Tue Apr 14 11:12:35 UTC 2020
+2020-04-14T11:12:35.312+0000 writing psdp.logs to archive '/home/ubuntu/mongoBackup/psdp-1586862755'
+2020-04-14T11:12:35.314+0000 done dumping psdp.logs (1 document)
+2020-04-14T11:12:35.337+0000 writing psdp.users to archive '/home/ubuntu/mongoBackup/psdp-1586862755'
+2020-04-14T11:12:35.338+0000 done dumping psdp.users (1 document)
+done => 1586862755
+Copy to S3
+upload: ./psdp-1586862755 to s3://psdp-dev-mongo-backup/psdp-1586862755
+done => s3://psdp-dev-mongo-backup/psdp-1586862755
+psdp-1586844750
+psdp-1586848351
+psdp-1586851952
+psdp-1586855553
+psdp-1586859154
+psdp-1586862755
+delete => psdp-1586844750
+deleted localfile => psdp-1586844750
+delete on s3 => s3://psdp-dev-mongo-backup/psdp-1586844750
+delete: s3://psdp-dev-mongo-backup/psdp-1586844750
+deleted on s3
+====================================================================
+```
+
+Và đây là toàn bộ file đã `backup` bên `s3` . Chỉ có 5 file mới nhất. Đúng 1 tiếng 1 lần.
+
+![img](https://miro.medium.com/max/2194/1*5XX2fiOAv-rqyyUoNAlllA.png)
+
+À còn nữa nếu mà muốn `stop script` để làm gì đó thì chỉ cần kiếm `process id` của nó sau đó dùng command `kill` để giết nó.
+
+```bash
+ubuntu@ip-172-31-38-138:~/mongoBackup$ ps aux | grep cronbackupmongo
+ubuntu    9653  0.0  0.1  14856  1036 pts/0    S+   11:21   0:00 grep --color=auto cronbackupmongo
+ubuntu   21435  0.0  0.3  13312  3308 ?        S    06:12   0:00 bash ./cronbackupmongo.sh
+ubuntu@ip-172-31-38-138:~/mongoBackup$
+```
+
+Và `kill` process của nó, có id = `21435`
+
+```
+kill 21435
+```
+
+---
+
+Vậy là xong rồi, bye bye các bạn, cảm ơn đã ghé đọc bài, happy `kiếm tiền :))

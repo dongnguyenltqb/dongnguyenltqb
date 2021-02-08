@@ -1,0 +1,74 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "February 9, 2020",
+  slug: "/blog/docker-postgresql",
+  title: "Khởi chạy PostgresSQL server bằng Docker",
+  description: "",
+}
+
+export default Post(meta)
+
+Hi các bạn, sau một tuần không chạm vào laptop thì hôm nay mình quay lại và gửi đến các bạn bài hướng dẫn cài Postgres trên Docker. Trong khi viết những dòng chữ này thì mình đã không còn là developer nữa rồi, nhưng niềm đam mê và sở thích thì vẫn còn đó, và biết đâu sau này mình lại có cơ hội quay trở lại với nghề.
+
+Trước tiên, lý do mà mình cài Postgres trên Docker là vì nó khá đơn giản, dễ cài dễ dùng, muốn xóa đi thì cx dễ remove cái container đi là xong.
+
+Để chạy được postgres thì bạn phải pull image của Postpres về và sử run một container trên image đó.
+
+Để pull dùng lệnh
+
+```
+$ docker pull postgres
+```
+
+![img](https://miro.medium.com/max/3284/1*kuA4Wcrr6qLOiB6CW4re4g.png)
+
+Để run một container mình dùng lệnh dưới
+
+```
+$ docker run --name my-postgres -d -p 2345:5432 -e POSTGRES_PASSWORD=ai_khoc_noi_dau_nay postgres
+```
+
+Lệnh trên có nghĩa là
+
+```
+-d     : chạy container ở chế độ deamon, tức là chạy background
+-p     : map port 2345 vào port 5432 trong container-e POSTGRES_PASSWORD=ai_khoc_noi_dau_nay
+       : lệnh này set biết môi trường để postgres set password cho tài khoản postgres, nếu không set thì mặc định sẽ là không có.postgres: cái này là tên image.
+```
+
+![img](https://miro.medium.com/max/5092/1*CD-TYAV6aHTfi1mD5oA3Ng.png)
+
+Ok, giờ mình sẽ chui vào cái container để tạo database cũng như tạo user cho nó, các bạn có thể làm ngoài docker container nhưng nó sẽ yêu cầu bạn nhập pass khi đăng nhập, còn nếu chạy vào docker container luôn thì họ sẽ không yêu cầu nhập pass, điêu này nói rõ ở trong docs nằm ở [**\*đây\***](https://hub.docker.com/_/postgres).
+
+Để chui vô bash của container mình dùng lệnh
+
+```
+$ docker exec -it my-postgres bash
+```
+
+![img](https://miro.medium.com/max/1648/1*Sp5cg9xOoJSTHXAqkrUWGw.png)
+
+Sau đó dùng psql để kết nối với psql user là postgres, và ko cần nhập mật khẩu vì container cho phép điều đó. Tiếp theo tạo database “gaugau”, rồi user có username là “cay_to” và password là “thit cho xao lan” rồi gán tất cả quyền trên database cho user.
+
+```
+$ create database gaugau;
+$ create user cay_to with encrypted password 'thi_cho_xao_lan';
+$ grant all privileges on database gaugau to cay_to;
+```
+
+![img](https://miro.medium.com/max/3436/1*aUEtTvUNRnuuSksMrobrag.png)
+
+Mình dùng lệnh “\l” để list ra tất cả database hiện tại, xem hình thì thấy okie rồi.
+
+Sau đó mình out ra container và dùng psql của máy mình xem có kết nối được không.
+
+![img](https://miro.medium.com/max/2288/1*EjAl2N5w2SPgYwFWSu0FFQ.png)
+
+Vì mình thao tác ngoài container nên nó yêu cầu nhập pass, nhập “thit_cho_xao_lan” thì mình đã connect thành công.
+
+![img](https://miro.medium.com/max/2256/1*YZr2BRiZdjEVvkHX2hEn7A.png)
+
+---
+
+Vậy là mình đã cài đặt và chạy PostgreSQL bằng docker, mình xin được phép dừng bài viết tại đây, trở lại với vai trò “ chạy chợ “, mình sẽ vẫn tiếp tục hỏi hỏi và hi vọng được chia sẻ nhiều kiến thức hơn với các bạn trong tương lai, bye bye các bạn mình đi dọn hàng tiếp đây :D

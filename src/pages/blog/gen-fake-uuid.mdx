@@ -1,0 +1,72 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "March 2, 2020",
+  slug: "/blog/gen-fake-uuid",
+  title: "Generate fake UUID cực nhanh gọn",
+  description: "",
+}
+
+export default Post(meta)
+
+UUID là viết tắt của Universally Unique IDentifier. Mình chỉ hiểu đơn giản đây là một mã định danh duy nhất là một số gồm 128bit. Tổng cộng có 32 kí tự chia thành 5 phần cách nhau bởi 4 dấu gạch nối đơn cử
+
+```
+123e4567-e89b-12d3-a456-426655440000
+```
+
+Để generate ra một UUID thì bạn hoàn toàn có thể dùng 1 package nào đó mà khỏi cần nghĩ nhiều, nhưng mình sẽ tự generate ra 1 fake uuid bằng cách random ra một slice byte gồm 16 phần tử (8 bit) và sau đó để cho đẹp mắt thì mình sẽ convert hệ thập phân về base16.
+
+Vì sao là 16 phần tử và base 16. Thứ nhất mình muốn các kí tự trong uuid là chữ hoặc số A-Z 0–9, cộng thêm cty mình đang làm 1 dự án mang tên là HexSafe, mà hex là **hexadecimal** thập lục phân là 16 luôn. Và nếu số 8bit phân sang base16 thì chỉ tốn hai char nên mình sẽ random 16 số 8 bit.
+
+```go
+b := make([]byte, 16)
+_, err := rand.Read(b)
+if err != nil {
+   return "", err
+}
+```
+
+Sau đó mình sẽ lấy 4 số cho phần đầu, tiếp theo là 2,2,2 và cuối cùng là 6 số,
+
+để chuyển qua hex thì quá easy luôn. Có sẵn fmt.Sprintf(“%X”,n) để convert n về base16 dạng in hoa.
+
+```go
+fmt.Sprintf("%X-%X-%X-%X-%X", b[0:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
+```
+
+Mình có kết quả sau 3 lần generate
+
+```
+CB0C7CF2-B9C0-9133-0C6B-0EB0380305D8 <nil>
+FA18D239-BF14-4D82-B2E6-1000DA7870AF <nil>
+EDB05EC8-8AB1-E994-6E7E-67AB30708872 <nil>
+```
+
+Mặc dù là fake uuid, trên lý thuyết là có thể trùng lẫn nhau xác xuất 1/(256¹⁶)
+và nếu nó xảy ra thì thôi ý trời :)) đến UUID còn có thể trùng nhau cơ mà.
+
+Đây là full đoạn code gen uuid của mình.
+
+```go
+package main
+import (
+   "crypto/rand"
+   "fmt"
+)
+func main() {
+   f.mt.Println(uuid())
+   fmt.Println(uuid())
+   fmt.Println(uuid())
+}
+func uuid() (string, error) {
+   b := make([]byte, 16)
+   _, err := rand.Read(b)
+   if err != nil {
+    return "", err
+   }
+   return fmt.Sprintf("%X-%X-%X-%X-%X", b[0:4], b[4:6], b[6:8],b[8:10], b[10:]), nil
+}
+```
+
+Happy coding ^\_^

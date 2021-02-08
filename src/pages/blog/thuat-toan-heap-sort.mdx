@@ -1,0 +1,251 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "February 27, 2020",
+  slug: "/blog/thuat-toan-heap-sort",
+  title: "Thuật toán Heap Sort",
+  description: "",
+}
+
+export default Post(meta)
+
+Trước khi nói tới heap, hãy nhớ lại kiến thức cây nhị phân
+
+Cây nhị phân là một cây, mỗi nút trên cây có tối đa hai nhánh con, nút thứ i sẽ có 2 con là 2i và 2i+1.
+
+![img](https://miro.medium.com/max/2156/1*NZwUImSVR4MZZLSQlrLIUQ.png)
+
+Cây nhị phân
+
+Heap là một câu trúc cây nhị phân đầy đủ, mỗi nút trên cây đều chứa một nhãn có độ ưu tiên cao hơn các con của nó, nút gốc (root) là nút có độ ưu tiên cao nhất. Ví dụ heap min là cây là mọi con của nút i đều có giá trị >= heap[i], heap max thì mọi nút con đều nhỏ hơn nút cha.
+
+Heap nhị phân được ứng dụng rộng rãi dùng để cài đặt một hàng đợi ưu tiên, hay là trong thuật toán Distra tìm đường đi ngắn nhất, và trong bài này ta sẽ sử dụng Binary Heap để sắp xếp mảng.
+
+**Các thao tác thường dùng trên Heap là**
+
+- Tìm nút có độ ưu tiên cao nhất
+- Thêm một nút vào heap
+- Xóa bỏ nút gốc, nút có độ ưu tiên cao nhất.
+- Xây dựng heap từ tập có n phần tử
+
+**Để tìm nút có độ ưu tiên cao nhất, ta chỉ cần lấy nút gốc.**
+
+**Để thêm một nút vào heap**
+
+1. Nếu heap rỗng thì ta chỉ cần thay gốc bằng nút đó
+2. Nếu heap không rỗng
+3. Chọn vị trí để thêm nút.
+4. Giả sử heap có độ cao là h, và mọi nút ở độ cao h-1 có một nút nào đó chưa đủ 2 con (tổng số nút ở độ cao đó < 2^h) — thì gắn nút vào phía bên phải của nút ngoài cùng
+5. Nếu ở độ cao h đã đầy đủ nút thì thêm nút vào độ cao h+1
+6. Tiến hành vun đống nút dưới lên, nếu nút cha có độ ưu tiên thấp hơn nút con thì tiến hành đổi chỗ nút con và nút cha, sau đó lại xét tiếp nút cha đó cho tới khi nào thỏa mãn nút cha có độ ưu tiên hơn nút chon hoặc nút đang xét là nút cha thì thôi.
+
+**Để xóa nút gốc**
+
+1. Nếu cây đó chỉ có 1 nút thì chỉ xóa nút đó
+2. Nếu cây có nhiều hơn 1 nút là tiến hành lấy nút dưới dùng bên phải thế vào nút gốc sau đó tiến hành quá trình down heap.
+3. Quá trình down heap, so sánh độ ưu tiên với cả hai nút con(nếu có) , nếu độ ưu tiên thấp hơn 1 trong 2 nút con hoặc thấp hơn cả hai nút con thì tiến hành chọn nút có độ ưu tiên cao nhất trong 2 nút con và đổi vị trị với nó, cho tới khi nào nút đang xét là nút lá ( không có nút con)
+
+**Độ phức tạp.**
+
+- Thao tác lấy nút gốc O(1)
+- Thao tác thêm nút mới vào cây O(log N)
+- Thao tác xóa nút gốc : Tổng O(log N)
+- Thao tác xóa nút gốc O(1)
+- Thao tác down heap O(log N)
+
+**Áp dụng tính chất của Heap để sắp xếp**
+
+Trong phần này mình sẽ triển khai thuật toán sắp xếp nhanh bằng cách sử dụng tính chất, nút gốc là nút có độ ưu tiên cao nhất, mình sẽ xây dựng một heap từ mảng a có n phần tử sau đó, lấy lần lượt các phần tử trong heap ra thì mình có có các giá trị lấy ra có độ ưu tiên giảm dần.
+
+**Ngôn ngữ thực hiện. : Go**
+
+**Cấu trúc Heap** : struct Heap có field Leng, là độ dài của Heap và field Value là giá trị của các phần tử trong heap.
+
+```go
+type Heap struct {
+	Leng  int
+	Value []int
+}
+```
+
+**Thao tác khởi tạo Heap** : Mình sẽ xây dựng heap Min thiết lập Leng = 0, heap rỗng
+
+```go
+const nMax = 10000
+const maxValue = 100000000
+
+func init() {
+	h.Leng = 0
+	h.Value = make([]int, nMax+1, nMax+1)
+}
+```
+
+**Thao tác thêm một phần tử vào Heap** : Thêm vào và sau đó vun đống từ dưới lên qua function _UpHeap_.
+
+```go
+func (h *Heap) Insert(x int) *Heap {
+	h.Leng++
+	h.Value[h.Leng] = x
+	h.UpHeap(h.Leng)
+	return h
+}
+```
+
+**Thao tác UpHeap**
+
+```go
+func (h *Heap) UpHeap(i int) *Heap {
+	if (i == 1) || (h.Value[int(math.Floor(float64(i)/2))] <= h.Value[i]) {
+		return h
+	}
+	t := h.Value[i]
+	h.Value[i] = h.Value[int(math.Floor(float64(i)/2))]
+	h.Value[int(math.Floor(float64(i)/2))] = t
+	h.UpHeap(int(math.Floor(float64(i) / 2)))
+	return h
+}
+```
+
+**Thao tác xóa nút gốc** : Sau khi loại bỏ nút gốc, ta lấy phần tử ngoài cùng ở độ cao cao nhất thế vào nút gốc sau đó thực hiện quá trình DownHeap từ nút gốc
+
+```go
+func (h *Heap) RemoveRoot() *Heap {
+	h.Value[1] = h.Value[h.Leng]
+	h.Leng--
+	if h.Leng > 1 {
+             h.DownHeap(1)
+        }
+	return h
+}
+```
+
+**Thao tác DownHeap**
+
+```go
+func (h *Heap) DownHeap(i int) *Heap {
+	m := i * 2
+	if m > h.Leng {
+		return h
+	}
+	if h.Value[m] > h.Value[m+1] {
+		m++
+	}
+	if h.Value[m] < h.Value[i] {
+		t := h.Value[m]
+		h.Value[m] = h.Value[i]
+		h.Value[i] = t
+		h.DownHeap(m)
+		return h
+	}
+	return h
+}
+```
+
+**Hàm Main** : Tạo mảng a sau đó đẩy mỗi phần tử của a vào Heap, sau đó lấy trong heap ra dần dần ta có kết quả theo độ ưu tiên giảm giần
+
+```go
+func main() {
+	a := []int{8, 6, 4, 5, 7, 9, 2, 3, 2, 2, 6, 3, 6, 3, 6, 123, 6541, 3, 6, 3, 461, 35, 2}
+	for _, v := range a {
+		h.Insert(v)
+	}
+	for i := 1; i <= len(a); i++ {
+		fmt.Print(h.Value[1],)
+		h.RemoveRoot()
+	}
+}
+```
+
+**Kết Quả**
+
+```
+2 2 2 2 3 3 3 3 3 4 5 6 6 6 6 6 7 8 9 35 123 461 6541
+```
+
+**Full file heap.go**
+
+```go
+package main
+
+import (
+	"fmt"
+	"math"
+)
+
+type Heap struct {
+	Leng  int
+	Value []int
+}
+
+var h Heap
+
+const nMax = 10000
+const maxValue = 100000000
+
+func init() {
+	h.Leng = 0
+	h.Value = make([]int, nMax+1, nMax+1)
+}
+
+func (h *Heap) Insert(x int) *Heap {
+	h.Leng++
+	h.Value[h.Leng] = x
+	h.UpHeap(h.Leng)
+	return h
+}
+
+func (h *Heap) UpHeap(i int) *Heap {
+	if (i == 1) || (h.Value[int(math.Floor(float64(i)/2))] <= h.Value[i]) {
+		return h
+	}
+	t := h.Value[i]
+	h.Value[i] = h.Value[int(math.Floor(float64(i)/2))]
+	h.Value[int(math.Floor(float64(i)/2))] = t
+	h.UpHeap(int(math.Floor(float64(i) / 2)))
+	return h
+}
+
+func (h *Heap) DownHeap(i int) *Heap {
+	m := i * 2
+	if m > h.Leng {
+		return h
+	}
+	if h.Value[m] > h.Value[m+1] {
+		m++
+	}
+	if h.Value[m] < h.Value[i] {
+		t := h.Value[m]
+		h.Value[m] = h.Value[i]
+		h.Value[i] = t
+		h.DownHeap(m)
+		return h
+	}
+	return h
+}
+
+func (h *Heap) RemoveRoot() *Heap {
+	h.Value[1] = h.Value[h.Leng]
+	h.Leng--
+	if h.Leng > 1 {
+		h.DownHeap(1)
+	}
+	return h
+}
+
+func main() {
+	a := []int{8, 6, 4, 5, 7, 9, 2, 3, 2, 2, 6, 3, 6, 3, 6, 123, 6541, 3, 6, 3, 461, 35, 2}
+	for _, v := range a {
+		h.Insert(v)
+	}
+	for i := 1; i <= len(a); i++ {
+		fmt.Print(h.Value[1], " ")
+		h.RemoveRoot()
+	}
+}
+```
+
+Thuật toán Heap Sort ứng dụng tính chất khá đơn giản của Heap nhưng nếu là mình khi sort thì mình khi sort mình sẽ sử dụng QuickSort để hạn chế việc mất đi một mớ mem cho cái heap.
+
+Mình sẽ thực hiện tiếp Quick Sort trong phần sau của bài, cảm ơn các bạn đã đọc :D
+
+**Happy Coding ^\_^**

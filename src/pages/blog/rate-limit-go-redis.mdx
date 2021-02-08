@@ -1,0 +1,64 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "December 27, 2019",
+  slug: "/blog/rate-limit-go-redis",
+  title: "Rate limit với Go và Redis",
+  description: "",
+}
+
+export default Post(meta)
+
+Hế nhô các bạn, hôm nay mình xin được trình bày một giải pháp đơn giản để hạn chế spam connection tới server khiến server mất tài nguyên để xử lí.
+
+Mình sẽ dùng Redis để cache số request mà client đã thực hiện đến server, và dựa vào IP để xác minh client. Xác minh theo IP thì sẽ dẫn dến 1 hậu quả là sẽ vô tình từ chối connection đến từ các client khác sử dụng chung một network với client đó.
+Việc chọn thứ gì để phân biệt client thì đó là do các bạn lựa chọn nhưng trong bài này mình sẽ dựa vào IP để phân biệt người dùng :D
+
+Trước hết Redis là một loại dữ diệu được lưu trữ có cấu trúc được lưu trong ram, nó được lưu trong Ram nên các thao tác đọc/ghi sẽ rất nhanh, ngoài ra nó có hỗ trợ back up xuống/ restore từ ổ cứng.
+
+Để chạy Redis thì mình sẽ chạy Redis trong docker container vì việc này rất đơn giản chỉ với hai command bạn đã có server redis. Rất nhanh để test.
+
+- RUN `docker pull redis`
+- RUN `sudo docker run --name my-redis -p 6379:6379 -d redis`
+
+Vậy là chúng ta đã có 1 server Redis đang lắng nghe trên cổng : 6379
+
+Mình thường dùng Gin Framework để viết Web App trong Go, lí do thì vì mình thấy hỗ trợ khá tốt những thứ mình cần như, BindQuery, Parse Form Data hỗ trợ MiddleWare và cú pháp rất thân thiện
+
+![img](https://miro.medium.com/max/3148/1*eTC1bu_nCex8JZbeJawtjw.png)
+
+Hình trên mình có 1 middleware tên là “useRateLimit" nhận vào 2 tham số là “rateLimit" và “second" ở đây mình muốn trong “second" seconds thì giới nhận chỉ nhận “rateLimit" request và nếu số request vượt sẽ bị từ chối xử lí.
+
+Với Redis mình sử dụng package này [“github.com/go-redis/redis”](http://"github.com/go-redis/redis") được khá nhiều sao và hỗ trợ gần như đầy đủ.
+
+Ở phần khởi tạo redisClient mình set giá trị cho field “PoolTimeOut" = 60s là để giới hạn khoảng thời gian từ lúc redisClient khởi chạy lệnh tới redis-server nếu trong 60s đó nếu lệnh chưa thực hiện được thì sẽ được huỷ. Các bạn có thể set sao cho phù hợp.
+
+Xem MiddleWare có gì nào ^-^
+
+![img](https://miro.medium.com/max/3352/1*XKai0ddi5xljJoJq2uZgJQ.png)
+
+Ở đây useRateLimit sẽ trả một một “gin.HandlerFunc” ở function handler chúng ta sẽ lấy địa chỉ IP của client và tiến hành thực hiện function “incRequestCount" để ghi nhận request của client.
+
+Chúng ta sẽ làm như Follow chart dưới đây.
+
+![img](https://miro.medium.com/max/2162/1*bsgXKp2z_zNJpUQKoA6ttw.png)
+
+Mình sử dụng Lệnh “SetNX" , “Incr" và dùng trong một Transaction để bảo đảm tính sẽ chỉ có duy nhất một bộ thao tác thay đổi gía trị với một key tại một thời điểm và mọi bộ thao tác với giá trị của key sẽ được thực thi sau thời điểm đó.
+
+![img](https://miro.medium.com/max/3256/1*ZWHSf9Qw7eK_2lR6jPbFWg.png)
+
+Function sẽ bắt dầu một Transaction bằng cách theo giõi biến Key nếu không có bất cứ thao tác nào khác với biến thì nó sẽ lock tạm thời không cho các Transaction khác thao tác với biến cho đến khi function thực hiện xong.
+
+Lệnh “SetNX" , set một giá trị cho một biến đó nếu nó chưa có sẵn trong database, và sẽ hết hạn trong EX second (không bắt buộc)
+
+Lệnh “Incr" sẽ tăng giá trị biến đó lên 1 đơn vị
+
+Áp dụng cả hai thì chúng ta sẽ đếm được số request liên tục và tăng giá trị cho tới khi nào gía trị đó hết hạn và được khởi tạo lại.
+
+Sau khi tăng số lần client request nếu giá trị đó vượt qua “rateLimit" đã được quy ước thì fucntion sẽ trả về một lỗi vượt quá giới hạn request nếu không thì sẽ không trả về lỗi.
+
+Ở function “useRateLimit” chúng ta nhận được kết qủa mà quá trình tăng số request trả về, và giá trị là lỗi thì chúng ta sẽ từ chối kết nối bằng Status 403 và nếu không thì ta sẽ cho server tiếp tục xử lí Request.
+
+Vậy là xong rồi chỉ với vài dòng code đơn giản ta đã có thể chặn được số lượng lớn spam request. Để cải tiến thì sẽ cần phải làm nhiều, ví dụ như là BLock luôn IP trong khoảng bao lâu đó, hay để không block oan uổng ngừời cùng chung network thì sẽ phải tìm thêm cách để phân biệt client, nhưng trong khuổn khổ bài viết mình sẽ dừng lại ở đây.
+
+Source code các ban có thể có thể xem và góp ý giúp mình tại [\*\*\*đây\*

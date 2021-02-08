@@ -1,0 +1,123 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "December 27, 2019",
+  slug: "/blog/haproxy-basic",
+  title: "HAPROXY là gì, setup một load balancer đơn giản",
+  description: "",
+}
+
+export default Post(meta)
+
+![img](https://miro.medium.com/max/2118/0*akYN0DRQ3L9H70Im.png)
+
+Hế nhô các bạn, lại là mình đây, nhân dịp hôm nay mình có tìm hiểu qua về HAPROXY nên mình muốn viết vài dòng để chia sẻ về haproxy cũng như lí do chúng ta cần haproxy cho dự án.
+
+HAPROXY là một proxy server, load blancer, system monitoring, được sinh ra để làm nhiệm vụ của một front end web service. Vậy tại sao chúng ta lại cần đến nó. Trước khi khi mình làm việc với dự án nhỏ, web app của mình chỉ cần viết bằng NodeJS dùng Pm2 để có thể chạy multithread sau đó dùng Nginx để serve static file, làm proxy cho nodejs vậy là xong, chưa có khi nào chết cả, chưa bao giờ quá tải vì cơ bản đó cũng chỉ là một app nhỏ. Và nếu chết cũng chẳng sao :D chết thì restart lại thôi kk.
+
+Giờ đây khi bước qua một công ty mới, mình sẵp đối mặt với những vấn đề mới, khi lượng request lên tới hàng ngìn request per second thì việc scale hệ thống như thế nào để có thể đáp ứng được lượng request đó là một vấn đề cần phải giải quyết êm gọn.
+
+Về mặt cơ bản, khi lượng request nhiều lên, chúng ta sẽ có thể lựa chọn hai laị hình scale cho hệ thống đó là scale ngang và scale dọc, scale dọc tức là nâng cấp HDD lên SSD dung lượng cao, nâng cấp RAM, Vi xử lí… những đâu phải cứ nâng cấp hoài vậy được đâu, lúc đầu khi cầu hình thấp thì rất dễ nâng cấp lên cấu hình cao, nhưng khi cấu hình đã cao muốn nâng cấp lên cấu hình cao hơn thì rất khó, thứ nhất không phải linh kiện lúc nào cũng có sẵn, và giá cả cũng không phải rẻ. Scale theo chiều ngang tức là dùng thêm nhiều hệ thống tương tự như hệ thống hiện tại để chia nhau xử lí request.
+
+Và thường khi scale chúng ta sẽ kết hợp cả hai kiểu scale sao cho hợp lí nhất và ít chi phí nhất.
+
+Đến đây khi các hệ thống hoạt động cùng với nhau, nảy sinh ra vấn đề làm sao để giao request này cho hệ thống kia xử lí, từ đây mình xin viết gọn một hệ thống sẽ là một node. node x tưng ứng hệ hệ thống x.
+
+Haproxy sinh ra để giải quyết vấn đề này, haproxy sẽ làm vai trò của một proxy server, theo dõi tình trạng các node và sẽ gửi request đến các node.
+
+Nếu còn chưa hiểu về khái niệm proxy các bạn có thể tìm hiểu tại [đây.](https://vi.wikipedia.org/wiki/Máy_chủ_proxy)
+
+Cài đặt và sử dụng Haproxy rất dễ dàng. Trên MacOS chỉ cần mở terminal lên rồi chạy hai lệnh sau. Haproxy server của bạn đã sẵn sàng để chạy.
+
+```
+ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)" < /dev/null 2> /dev/nullbrew install haproxy
+```
+
+Để chạy được HAPROXY, chúng ta cần phải cấu hình cho nó. Về cơ bản haproxy có thể nhận các thông số cấu hình theo độ ưu tiên như sau
+
+- argument -> proxies setting -> global setting và theo mặc định thì những gì được setup trong global setting sẽ được bổ sung vào proxies setting.
+
+Chi tiết hơn các bạn xem trong file dưới đây. Mình sẽ giải thích từng phần có nhiệm vụ như thế nào.
+
+```yaml
+global
+log 127.0.0.1   local0
+log 127.0.0.1   local1 debug
+maxconn 4096
+
+defaults
+log     global
+mode    http
+option  httplog
+option  dontlognull
+retries 3
+option redispatch
+maxconn 2000
+timeout connect      5000
+timeout client      50000
+timeout server      50000
+
+
+frontend haproxy
+bind *:9090
+stats enable
+stats uri /stats
+stats refresh 10s
+stats admin if TRUE
+stats auth dongnguyen:029
+default_backend go-web-server
+
+backend go-web-server
+balance roundrobin
+server node1 0.0.0.0:6000 check
+server node2 0.0.0.0:7000 check
+server node3 0.0.0.0:5000 check
+option httpchk /GET /whatever
+```
+
+- Global session : những tham số thiết lập ở đây sẽ mặc định được sử dụng trong proxies session, hoàn toàn có thể overwrite nó trong proxies session
+- Proxies Session : tên gọi chung cho cả “default session, front end session, back end session". Vì haproxy là một server proxy nên hẳn nó sẽ phải có cái gì đó là front end. Có thể là chính là http request từ client hoặc cũng có thể là một front-end web server như Nginx.
+
+Ở file trên mình setup Global session có những key là log và maxconn, setup hai key này với giá trị như trên sẽ chỉ cho haproxy ghi 2 loại log vào system log server được lắng nghe mặc định trên cổng 514. Và ở loại log thứ 2 ghi ở level debug, các bạn có thể xem các loại log và level log tại [đây](https://success.trendmicro.com/solution/TP000086250-What-are-Syslog-Facilities-and-Levels).
+
+Phần default session, mình setup mặc định sẽ dùng log được được setup trong Global session, proxy mode là http, ngoài http thì các bạn có thể chọn tcp, khi chọn tcp thì một kết nối đầy đủ sẽ được tạo ra giữa client và server, đây là mode mặc định, còn khi chọn http thì request sẽ được phân tích, những request nào không đáp ứng được chuẩn “RFC-compliant” . Timeout client,timeout server, timeout connect nếu khi một request được tạo ra nếu trong vòng x miliseconds mà không thực hiện được thì haproxy sẽ bỏ qua request đó.
+
+“Front end session" ở đây mình có cái thứ nhất là tool của haproxy giúp mình có thể xem được tình trạng các node, số request đã được các node thực hiện, thứ hai là dùng “back-end" có tên là “go-web-server" để handle request. Mình cho haproxy lắng nghe request từ front-end haproxy trên cổng 9090. Khi vào /stats thì sẽ phải authenticate với username và password phía trên.
+
+Tiếp theo đến phần “back-end", ở đây mình khai bao 3 nodes tương đương với 3 hệ thống cùng chạy song song, mỗi node sẽ lắng nghe trên port khác nhau, mình khai báo haproxy check tình trạng của server trước khi thêm node vào danh sách node để pass_proxy. Một lưu ý là nếu để mặc định thì khi check status server haproxy sẽ gửi request với method “options" đến server của chúng ta và nếu nó nhận đc status code =200 thì có nghĩa là node của chúng ta đang hoạt động, bạn cũng có thể thay đổi mặc định bằng cách set
+
+```
+ option httpchk <method> <uri>
+```
+
+ví dụ mình muốn haproxy gửi một method get để check vào url “/check"
+
+thì mình sẽ ghi “ **option httpchk get /check”**
+
+Và cuối cùng là thuật toán mà từ đó Haproxy có thể dùng để xác định nên gửi request vào node nào. Thuật toán “roundrobin" có nghĩa là haproxy sẽ gửi request theo vòng tròn, 1–2–3–1–2… cứ như vậy ngoài ra còn vài thuật toán nữa các bạn có thể xem tại [**đây.**](http://cbonte.github.io/haproxy-dconv/2.1/configuration.html#4.2-balance)
+
+![img](https://miro.medium.com/max/3156/1*-q5pgqb30kAZSi0745GU6w.png)
+
+Hiện tại mình đang có 3 node chạy song song đang lắng nghe request trên cổng 5000,6000 và 7000. Và để khởi chạy HAPROXY mình chỉ cần RUN
+
+**\*haproxy -f path/to/file/config\***
+
+Như trong trường hợp của mình do mình mình sẽ chạy
+
+**\*haproxy -f haproxy.cfg\***
+
+Để xem HAPROXY của mình đang có hoạt động không, do mình đa khai báo front-end stats của haproxy đang lắng nghe trên cổng 6789, nên để xem haproxy status, monitoring mình chỉ cần đến “http://localhost:6789/stats”
+
+![img](https://miro.medium.com/max/5120/1*560iOg7GWK0MSY7dN47Ysw.png)
+
+Để check xem server có phân chia request tới 3 con server mình đang chạy hai không mình tiến hành gửi ba request tới và đây là kết quả.
+
+![img](https://miro.medium.com/max/1604/1*QkdhITKJrTCj9A18hjSKpA.png)
+
+![img](https://miro.medium.com/max/1552/1*haT8tpuWOTW5LJpwmBc-yA.png)
+
+![img](https://miro.medium.com/max/1384/1*vSCJHeOmvDSlIvHbcEQblw.png)
+
+Tèn tèn vậy là mình vừa setup một load balancer đơn giản với 3 node chạy song song, trong thực tế thì các bạn sẽ phải làm rất nhiều thứ như làm sao để chia sẻ tài nguyên, ví dụ như database, đồng bộ log giữa ba server. Mình sẽ chia sẻ thêm nhiều hơn trong tương lai khi mình được làm việc trực tiếp với nó.
+
+Cảm ơn các bạn đã đọc bài viết của mình. Bye bye các bạn ^\_^.

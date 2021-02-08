@@ -1,0 +1,305 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "January 6, 2020",
+  slug: "/blog/function-score-elastic-basic",
+  title: "Function-Score trong Elasticsearch.",
+  description: "",
+}
+
+export default Post(meta)
+
+![img](https://miro.medium.com/max/2932/1*Ntk_Q6nD-3CppNgg9A67Aw.png)
+
+Khi search trong elasticsearch, đôi khi chúng ta mong muốn sẽ chấm điểm dựa trên những điều kiện đã đặt ra để lấy ra một danh kết quả chính xác.
+
+Ví dụ khi bạn search những người có tên có chứa cụm từ “ste" và mong muốn nếu first_name tên đó là “steph " thì + thêm 3 điểm hoặc nếu first_name của tên đó là “stephen" thì + 5 điểm, …vv, lúc này bạn chắc hẳn sẽ dùng đến function-score để custom hàm chấm điểm.
+
+```js
+GET /_search
+{
+    "query": {
+        "function_score": {
+          "query": { "match_all": {} },
+          "boost": "5",
+          "functions": [
+              {
+                  "filter": { "match": { "test": "bar" } },
+                  "random_score": {},
+                  "weight": 23
+              },
+              {
+                  "filter": { "match": { "test": "cat" } },
+                  "weight": 42
+              }
+          ],
+          "max_boost": 42,
+          "score_mode": "max",
+          "boost_mode": "multiply",
+          "min_score" : 42
+        }
+    }
+}
+```
+
+Như hình trên mỗi function-score là một kiểu “query", chỉ là nó hơi đặc biệt, trong function-score, field “query" quy định điều kiện để mỗi index được chấm điểm như đoạn code trên.
+
+```js
+"query": { "match_all": {} }
+```
+
+Điều này có nghĩa là mọi index sẽ được chấm điểm dựa, hoặc nếu như đoạn code đưới thì nếu index đáp ứng điều kiện là first_name hoặc last_name là “do” thì index sẽ được chấm điểm. Function-Score sẽ kết hợp điểm của query và điểm của function.
+
+```js
+"query": {
+   "bool":{
+        "should":[
+           {
+               "match":{
+                  "first_name":"do"
+               }
+           },
+           {
+               "match":{
+                  "last_name":"do"
+               }
+           }
+        ]
+     }
+}
+```
+
+Trong mỗi “function-score” những thông số như
+
+- **score_mode** : định nghĩa các kết quả điểm được tạo ra bằng query và điểm tạo ra trong function (function trong function-scrore) sẽ được kết hợp như thế nào, có 6 kiểu nhân, cộng , trung bình cộng, max và min, hoặc là lấy điểm của function đầu tiên có filter match với index.
+- **boost_mode** : định nghĩa cách tính điểm khi mà có các điểm mới được tạo ra bằng function score, có 6 kiểu, nhân, cộng, trung bình cộng, thay thế, min, max
+- **boost** : điểm để tăng dùng để tính điểm cho các kết quả truy vấn bằng query ( query trong function_score)
+- **functions** : tập hợp các function để tính thêm với các index đã được chọn và tính điểm bằng “query"
+
+Function trong Functions của Function-score là nơi chấm điểm cho các kết quả đã được trả về từ query, mỗi index được chấm điểm nếu nó match vs filter của function.
+
+```js
+{
+    "filter": {
+          "term": {
+               "first_name": "dong"
+          }
+    },
+    "weight": 5
+}
+```
+
+Như đoạn code trên nếu mỗi index sau khi chọn mà thoả mã filter trên thì sẽ được weight = 5 điểm trả về từ function. 5 Điểm này sẽ kết hợp với điểm của các function khác qua giá trị của “score-mode" ví dụ cộng lại điểm của các function hay lấy trung bình cộng, hoặc lên min,max … để trả về kết quả của “functions”.
+
+Ngoài cách dùng functions tính điểm ta còn có thể dùng “script-score" để chấm điểm.
+
+```js
+"script_score":{
+    "script":{
+         "source":"double lat2 = doc.coord.lat; double lon2 =    doc.coord.lon; double p1=(lon2-params.lon1)*Math.cos(0.5*(lat2+params.lat1)); double p2 = lat2-params.lat1; double distance = 6371*Math.sqrt(p1*p1+p2*p2); return distance;",          "params":{
+              "lat1":10.780231,
+               "lon1":106.6645121
+           }
+       }
+   }
+```
+
+Nhìn sơ qua thì script score sẽ chạy một đoạn code với Index, dùng những tham số đã được truyền qua từ bên ngoài để trả về điểm.
+
+Code demo, sau đây mình sẽ viết một query để chấm điểm cho những kết quả trả về khi mình search những user mà first_name hoặc last_name có chứa chữ “shar”, trả về 1 điểm và nếu first_name hoặc last_name là “sharland" thì mình sẽ cộng thêm 5 điểm.
+
+```js
+{
+	"query":{
+		"function_score":{
+			"query":{
+				"bool":{
+					"should":[
+						{
+							"match":{
+								"first_name":"shar"
+							}
+						},
+						{
+							"match":{
+								"last_name":"shar"
+							}
+						}
+					]
+				}
+			},
+			"boost":1,
+			"boost_mode":"replace",
+			"score_mode":"sum",
+			"functions":[
+				{
+					"filter":{
+						"term":{
+							"first_name":"sharland"
+						}
+					},
+					"weight":5
+				},
+				{
+					"filter":{
+						"term":{
+							"last_name":"sharland"
+						}
+					},
+					"weight":5
+				}
+			]
+		}
+	}
+}
+```
+
+Ở trên câu query trên, mình chỉ ra rằng, đầu tiền cần tìm ra những index có first_name hoặc last_name có chứa cụm từ “shar” và nếu có thì trả về 1 điểm cho những index này, sau đó tiếp tục tính điểm tiếp với function có filter, nếu index thoả mãn filter thì sẽ trả về 5 điểm.
+Do mình setup “boost_mode = replace “ nghĩa là điểm của function score sẽ thay thế điểm của query trên, “score_mode = sum ", nhưng do chỉ có một function nên tổng điểm của functions = điểm của function.
+
+Và sau đây là kết quả
+
+```js
+{
+    "took": 14,
+    "timed_out": false,
+    "_shards": {
+        "total": 1,
+        "successful": 1,
+        "skipped": 0,
+        "failed": 0
+    },
+    "hits": {
+        "total": {
+            "value": 30,
+            "relation": "eq"
+        },
+        "max_score": 5.0,
+        "hits": [
+            {
+                "_index": "users",
+                "_type": "_doc",
+                "_id": "5e0966c1964c7c6f51fd9a87",
+                "_score": 5.0,
+                "_source": {
+                    "first_name": "Dolly",
+                    "last_name": "Sharland"
+                }
+            },
+            {
+                "_index": "users",
+                "_type": "_doc",
+                "_id": "5e0966c1964c7c6f51fd99f4",
+                "_score": 1.0,
+                "_source": {
+                    "first_name": "Sherwood",
+                    "last_name": "Epsly"
+                }
+            },
+            {
+                "_index": "users",
+                "_type": "_doc",
+                "_id": "5e0966c1964c7c6f51fd9a07",
+                "_score": 1.0,
+                "_source": {
+                    "first_name": "Evy",
+                    "last_name": "Sharpless"
+                }
+            },
+            {
+                "_index": "users",
+                "_type": "_doc",
+                "_id": "5e0966c1964c7c6f51fd9a0b",
+                "_score": 1.0,
+                "_source": {
+                    "first_name": "Hewett",
+                    "last_name": "Shimon"
+                }
+            },
+            {
+                "_index": "users",
+                "_type": "_doc",
+                "_id": "5e0966c1964c7c6f51fd9a12",
+                "_score": 1.0,
+                "_source": {
+                    "first_name": "Sheffy",
+                    "last_name": "Dwelley"
+                }
+            },
+            {
+                "_index": "users",
+                "_type": "_doc",
+                "_id": "5e0966c1964c7c6f51fd9a73",
+                "_score": 1.0,
+                "_source": {
+                    "first_name": "Shermie",
+                    "last_name": "Canedo"
+                }
+            },
+            {
+                "_index": "users",
+                "_type": "_doc",
+                "_id": "5e0966c1964c7c6f51fd9b3f",
+                "_score": 1.0,
+                "_source": {
+                    "first_name": "Shaylyn",
+                    "last_name": "Goodread"
+                }
+            },
+            {
+                "_index": "users",
+                "_type": "_doc",
+                "_id": "5e0966c1964c7c6f51fd9b40",
+                "_score": 1.0,
+                "_source": {
+                    "first_name": "Norrie",
+                    "last_name": "Shearmur"
+                }
+            },
+            {
+                "_index": "users",
+                "_type": "_doc",
+                "_id": "5e0966c1964c7c6f51fd9b61",
+                "_score": 1.0,
+                "_source": {
+                    "first_name": "Sherlocke",
+                    "last_name": "Webley"
+                }
+            },
+            {
+                "_index": "users",
+                "_type": "_doc",
+                "_id": "5e0966c1964c7c6f51fd9b6c",
+                "_score": 1.0,
+                "_source": {
+                    "first_name": "Shannon",
+                    "last_name": "Ramirez"
+                }
+            }
+        ]
+    }
+}
+```
+
+Và đúng như kì vọng, index có điểm cao nhất là 5 điểm thoả mãn tất cả các điều kiện, còn lại đều nhận chung 1 điểm vì không thoả mãn function filter.
+
+```js
+{
+     "_index": "users",
+     "_type": "_doc",
+     "_id": "5e0966c1964c7c6f51fd9a87",
+     "_score": 5.0,
+     "_source": {
+            "first_name": "Dolly",
+            "last_name": "Sharland"
+     }
+},
+```
+
+Như các bạn thấy đó, function rất hữu dụng khi bạn muốn custom score trả về theo mong muốn, để tìm hiểu về function-score bạn có thể ghé thăm tại [**\*đây\***](https://www.elastic.co/guide/en/elasticsearch/reference/7.5/query-dsl-function-score-query.html#query-dsl-function-score-query).
+
+---
+
+Cá nhân mình cũng mới tìm hiểu và không tránh khỏi nhiều sai sót, trong tương lai nếu có cơ hội mình sẽ chia sẻ tiếp về những điều thú vị của elasticsearch. Mình xin dừng bút tại đây, cảm ơn các bạn đã đọc bài ^\_^
+
+Chúc các bạn một ngày tốt lành :D

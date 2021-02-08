@@ -1,0 +1,40 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "December 26, 2019",
+  slug: "/blog/dns-basic",
+  title:
+    "DNS là gì ? tại sao chúng ta lại bị nhà mạng chặn khi vào web không lành mạnh.",
+  description: "",
+}
+
+export default Post(meta)
+
+Hế nhô các bạn, hôm nay mình vừa tìm hiểu về DNS và muốn chia sẻ với các bạn những điều mình vừa mới biết.
+Chắc hẳn các bạn ai cũng đã từng sử dụng trình duyệt, nhập địa chỉ trên thanh địa chỉ, cuối cùng nhấn enter rồi cả một thế giới mới hiện trước mắt chúng ta. Rồi chắc các bạn đã nhìn thấy ai đó gõ một cụm 4 số cách nhau bởi dấu “.” xong enter cái bụp rồi cũng hiện ta những gì bạn đã làm với những con chữ kia chứ :D
+
+Khi bạn vào một trang Web thì thực chất bạn đang nhờ trình tuyệt tìm địa chỉ của website đó, cái mà có 4 số cách nhau bởi dấu “.” ý. Trình duyệt sẽ làm những việc gì đó để tìm ra cái địa chỉ 4 số đó. Và cái 4 chữ số đó người ta gọi là IP còn cụm chữ kia người ta gọi là Tên Miền (Domain trong tiếng anh)
+
+IP và Domain luôn song hành với nhau, việc nhớ Domain sẽ rất dễ so với việc nhớ mấy con số kia, từ IP bạn sẽ truy cập vào được tài nguyên của máy chủ nhưng khi bạn có trong tay Domain thì chưa chắc bạn có thể tìm được máy chủ nhà người ta.
+
+Mỗi Domain được một cấp bởi một tổ chức quản lí Domain và tổ chức đó có sẵn công cụ để giúp ta tìm được địa chỉ IP máy chủ ứng với tên miền đó. Cái đó được gọi là DNS viết đầy đủ là Domain Name System dịch ra tiếng việt là Hệ thống phân giải tên miền.
+
+Khi bạn truy cập vào một Domain, việc đầu tiên trình duyệt sẽ làm là nhờ các DNS server tìm kiếm địa chỉ IP ứng với tên miền đó. Mặc định nếu bạn không chỉ định DSN server thì bạn sẽ dùng DSN server của Nhà cung cấp dịch vụ mạng cho bạn, cái tổ chức mà hàng tháng cứ đến cuối tháng là thu tiền mạng, hay phải goị điện thoại chửi mỗi khi nó bóp băng thông khiến mạng như rùa ý haha.
+
+Chính vì việc bạn sử dụng DNS server của nhà mạng nên họ sẽ ngăn chặn việc bạn truy cập vào các trang Web không lành mạnh. Họ đơn giản chỉ cần không trả về cái địa chỉ IP đó.
+
+Vậy để muốn truy cập các trang web đó bạn cần phải sử dụng DNS server khác, của Google chẳng hạn, google sẽ không chặn bạn đâu.
+
+Và để sử dụng DNS server của ai đó các bạn hãy xem qua bài viết[ _này_ ](https://quantrimang.com/huong-dan-thay-doi-dns-server-tren-windows-mac-va-android-121279)_._
+
+## Vậy nếu có nhiều DNS server và nhiều nhà cung cấp Domain thì làm sao để biết Domain nào là của tổ chức nào là làm sao để các tổ chức có thể trao đổi thông tin cho nhau.
+
+Để giải quyết vấn đề này sẽ có một tổ chức đứng chịu trách nhiệm điều hành, tổ chức đó có tên là “_Internet Corporation for Assigned Names and Numbers”_
+
+Họ sẽ điều hành hệ thống “Root Domain", chia tên miền thành các kiểu có dạng “.com, .vn, .net, .org”. Cái đó gọi hệ thống “Top Domain" và cứ như vậy sẽ dựa từ phân cấp ra thành nhiều bậc thấp hơn.
+
+Vậy khi bạn mua một tên mình của một nhà cung cấp nào đó. Nếu bạn cung cấp địa chỉ IP ứng với tên miền đó, nhà cung cấp sẽ đồng bộ nó lên hệ thống Root Domain và vì thế các DSN server khác sẽ dễ dàng tìm được địa chỉ IP đó.
+
+Đến đây là hết rồi, để tìm hiểu sâu hơn các bạn có thể vào [đây](https://medium.com/@earthtojhuang/what-happens-when-you-type-a-url-in-a-browser-and-hit-enter-68942c052a6c) để tham khảo.
+
+Bye bye. ^\_^

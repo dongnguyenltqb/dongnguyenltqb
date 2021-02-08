@@ -1,0 +1,113 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "December 25, 2019",
+  slug: "/blog/text-search-elastic",
+  title: "Full text search với Elasticsearch",
+  description: "",
+}
+
+export default Post(meta)
+
+Xuất thân với NodeJS, đồng nghĩa với gần như 90% bạn sẽ học NoSQL trước SQL. Mình cũng vậy, bắt đầu với NoSQL cụ thể hơn là MongoDB, lí do mà mình chọn MongoDB để học là vì NodeJS với MongoDB là cặp bài trùng, có duyên với MongoDB và ruốt cuộc cũng làm việc với MongoDB đến bây giờ.
+
+Với MongoDB mình cảm thấy rất thoải mái để thiết kế data model, không cứng nhắc và quy tắc như SQL, thích thêm, xoá fieldmuốn lưu cái gì cũng được, mọi thứ gói gọn lại trong 1 từ Document.
+
+Mọi thứ ban đầu cũng rất là màu hồng, cho đến khi mình gặp 1 task mà xếp đưa ra, cho keywork và lấy ra những document của user có field fullName bao gồm keywork đó ví dụ bạn chỉ cần query “don" thì user có fullName là “nguyen huu dong” sẽ được lấy ra, và mọi thứ bắt đầu từ đây, mình không thể search bằng cách dùng Regex build in của MongoDB được, nó hoạt động rất chậm. Để khắc phục vấn đề này sau vài vòng Google mình thấy có một engine search rất nổi tiếng cho việc text search là Elasticsearch. Và thưc sự thì nó nhanh :D
+
+**Bắt đầu nào**
+
+Đầu tiên hãy tải và cài đặt Elasticsearch, cách dễ nhất là run Elasticsearch trong 1 docker container, nếu chưa biết docker container là gì bạn có thể tìm hiểu tại [đây](https://viblo.asia/p/docker-chua-biet-gi-den-biet-dung-phan-1-lich-su-ByEZkWrEZQ0), vì một số vấn đề mình chưa giải quyết được nên khi sử dụng Golang mình sẽ dùng Elasticsearch v 6.8.5 để sử dụng
+
+sau đó các bạn chạy lên sau, sau đó thì nếu bạn truy cập được vào
+http://localhost:9200 và được kết quả tương tự hình dưới thì bạn đã cài và khởi chạy Elasticsearch thành công.
+
+![img](https://miro.medium.com/max/3636/1*1zNOnCG_4USRK6SJ2xEJIQ.png)
+
+![img](https://miro.medium.com/max/1784/1*o2DTm1uqp4ZBe__l_0jEnA.png)
+
+Bây giờ chúng ta sẽ Setup một vài thứ cơ bản để có thể giúp chúng ta search được text trong 1 field, bất kể là chữ hoa hay chữ thường.
+
+Tạo một index và cài đặt, khởi tạo những thuộc tính cho index đó trong database, việc này tương tự như việc create index cho mongodb
+
+Mình sẽ tạo 1 bộ Index tên là “gaugau” mọi document trong index sẽ được index với type là “\_doc", mình chọn type là “\_doc” vì mình đã quen với MongoDB, bạn chỉ cần đẩy toàn bộ nội dung trong file này tới api của elasticsearch với method PUT. Mình sẽ giải thích những gì có trong nội dung của file.
+
+```json
+CURL -X PUT http://localhost:9200/gaugau
+
+{
+  "settings": {
+    "analysis": {
+      "analyzer": {
+        "my_analyzer_3_50": {
+          "tokenizer": "my_tokenizer_3_50",
+          "filter": [
+            "lowercase"
+          ]
+        }
+      },
+      "tokenizer": {
+        "my_tokenizer_3_50": {
+          "type": "ngram",
+          "min_gram": 3,
+          "max_gram":50,
+          "token_chars": [
+            "letter",
+            "digit"
+          ]
+        }
+      }
+    }
+  },
+  "mappings": {
+    "_doc": {
+      "properties": {
+        "first_name": {
+          "type":     "text",
+          "analyzer": "my_analyzer_3_50"
+        }
+      }
+    }
+  }
+}
+```
+
+Setting, analysis, analyzer và tokenizer. Đầu tiên trước khi elastic đánh index cho những text field của mình, nó sẽ analysis text với analyzer được mình chỉ định và analyzer đó sẽ sử dụng tokenizer mà mình đã tạo ra để bẽ gãy các từ trong text, ở trên chúng ta khai bao 1 analyzer tên là “my_analyzer_3_50” với filter “lowercase" việc chọn filter này sẽ giúp ta có thể search được mà không cẩn phải quan tâm keywork viết hoa hay viết thường, nó sẽ lowercase các từ mà field và sau đó mới tiến hành bẻ gãy từng từ đó. Tiếp đến tokenizer đây là người sẽ gíup chúng ta bẻ gãy những thứ đó là ta sẽ quy định nó sẽ được bẻ như thế nào.
+
+**min_gram = 3 max_gram=50**
+
+Hai hằng số trên quy định về các từ phụ sẽ được bẻ ra sẽ có độ dài ít nhất là min_gram là dài nhất là max_gram, khai báo min_gram càng nhỏ và max_gram càng lớn sẽ khiến chúng ta mất rất nhiều không gian để lưu trữ và có thể phản tác dụng khi phải query trong một mới hỗn độn các từ. Ví đụ chữ “dong” với min_gram = 3 sẽ được bẽ gãy là thành các từ “don" “ong" và “dong" với một từ dài hơn như “thinh” thì ôi thôi các bạn sẽ nhận được “thi” “thin" “thinh" “hin" “hinh" và “inh" đó mới chỉ là một từ có 5 kí tự, hãy tưởng tượng xem với một a chàng có cái tên là “[Uvuvwevwevwe Onyetenyevwe Ugwemubwem Osas](https://www.youtube.com/watch?v=G8sKs-A2gBw)” thì chúng ta sẽ có rất nhiều không gian để lưu trữ tên của a chàng này.
+
+Vì vậy quy định min và max_gram sẽ dựa vào Business Logic mà team bạn đang triển khai.
+
+Để tiến hành test xem analyzer của chúng ta hoạt động ra sao, có ra lệnh cho tokenizer bẻ gãy các từ được không thì hãy thử gửi 1 request test analyze.
+
+```json
+{
+	“analyzer”: “my_analyzer_3_50”,
+	“text”: “Dong den Lozi Ahihi.”
+}
+```
+
+Nếu bạn nhận được output tương tự như bên dưới thì tốt rồi, analyzer của chúng ta đã hoạt động.
+
+![img](https://miro.medium.com/max/3616/1*J6WOggIuisJ2_McZAIB_Lg.png)
+
+Tiếp theo. Việc rất quan trọng “mapping" mình muốn Elasticsearch đánh index cho field của mình là “text field" thì mình sẽ phải setup “type = text” và sử dụng “my-analyzer_3_50” để phân tích sau đó bẻ gãy các từ.
+
+Xong việc Mapping và Setup Analyzer cho bộ Index, nó cũng đồng nghĩa với việc create Index và Index Type trong MongoDB
+
+Tiếp theo hãy thử index một document trong bộ index “gaugau" và sử dụng
+
+Mình đã index 1 doc với id=1 từ trước hình dưới đây mình đánh index cho 1 doc có id=2 với json content như trong hình và mình nhận đc response 200 từ elasticsearch, mọi thứ đang rất suôn sẻ.
+
+![img](https://miro.medium.com/max/3188/1*GFAlLo5ZWlEmZF3hwhQ2cg.png)
+
+Tiếp theo màn quan trọng nhất, setup nãy giờ rồi rồi có search được không. Hãy gửi lên một request tới elasticsearch như trong hình lần này chúng ta sẽ tìm chữ “ong" xem nó có search ra được các document có “first_name” bao gồm “ong" không. Chúng ta sẽ sử dụng analyzer có tên là “my_analyzer_3_50” giúp chúng ta dò.
+
+Kết quả như mong dợi, mình đã lấy được nó trong bộ index.
+
+![img](https://miro.medium.com/max/2476/1*v-g3EiGA3l63FhDqS-kw0w.png)
+
+Vậy là từ nay mình sẽ không cần phải lo lắng việc text search nữa, vì đã có Elasticsearch ở đây rồi.
+Vì mình cũng đang tìm hiểu Elasticsearch nên có gì sai sót mong mọi người comment, góp ý để mình hoàn thiện hơn. Cảm ơn mọi người đã đọc :D

@@ -1,0 +1,300 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "February 21, 2020",
+  slug: "/blog/mongo-cluster-basic",
+  title:
+    "Xây dựng cụm cơ sở dữ liệu bằng MongoDB ( Building Database Clusters with MongoDB )",
+  description: "",
+}
+
+export default Post(meta)
+
+Như các bạn đã biết, mongodb là một cơ sở dữ liệu không có quan hệ rất nổi tiếng (NoSQL). Thay vì việc sử dung các bảng có các thuộc tính cố định, mongodb lưu trữ dữ liệu dưới dạng document, dạng key-value, mongodb cũng hỗ trợ scale ngang khi prod lớn lên. Trong bài này mình sẽ hướng dẫn các bạn setup cluster theo phong cách mi ăn liền.
+
+Trước khi bắt đầu các bạn hãy nhìn qua hình dưới đây là cách mà mongo cluster hoạt động
+
+![img](https://miro.medium.com/max/1960/1*L8p0Re5hNtr_UjN_snJ_Jg.png)
+
+Nhìn vào hình trên cluster gồm 3 phần chính.
+
+- [shard](https://docs.mongodb.com/manual/core/sharded-cluster-shards/): Mỗi shard chứa đựng một tập nhỏ các data đã sharded, từ phiên bản 3.6 trở lên, shards phải được cấu hình chạy replicaset nếu muốn trở thành một phần của cluster.
+- [mongos](https://docs.mongodb.com/manual/core/sharded-cluster-query-router/): Đây thực ra là một query router, cung cấp một giao diện tương tác giữa ứng dụng và các sharded cluster.
+- [config servers](https://docs.mongodb.com/manual/core/sharded-cluster-config-servers/): Config server chứa đựng metadata và cấu hình cho cluster, từ phiên bản 3.4 trở lên config server phải deploy dưới dạng replicaset.
+
+# Chuẩn bị.
+
+Dể cài đặc chúng ta cần phải chuẩn bị đủ ba phần của cluster,bao gồm 2 config sever, 1 query router server, và 1 shard. Đối với shard mình sẽ dùng 2 server chạy replicaset, mặc dù có thể dùng docker để gộp lại nhưng làm vậy sẽ mất tính tổng quan và rườm ra.
+
+Trước khi bắt đầu chúng ta phải chuẩn bị [_mongo-keyfile_](https://docs.mongodb.com/manual/tutorial/enforce-keyfile-access-control-in-existing-replica-set/)_._ Mongo keyfile thứ giúp các server xác định là chúng nó là gà cùng một mẹ. Mình sẽ chỉ authenticate bằng mongo-keyfile để cho nó đơn giản, nếu các bạn muốn authen bằng cả username và password thì trên 2 con server config, và 2 con server để tạo 1 shard các bạn dùng mongo shell để tạo username và password cho nó. Trên cả 4 con server đó bạn chạy các lệnh sau
+
+```
+mongo
+# lệnh trên dùng mongo shell để kết nối tới server, vì lúc đầu chưa # có username hay password gì cả nên bạn sẽ vào được
+use admin
+# lệnh trên dùng database admin,để lưu trữ những user mà ta sẽ tạo phía sau
+db.createUser({user: "mongo-admin", pwd: "123", roles:[{role: "root", db: "admin"}]})
+# lệnh trên tạo ra một user có username là "mongo-admin" và password # là "123" trên và có vai trò là root của database có tên là admin
+```
+
+Để tạo ra key file các bạn dùng lệnh.
+
+```
+openssl rand -base64 756 > mongo-keyfile
+```
+
+Sau Khi tạo ra keyfile, hãy copy chúng lên trên cả 5 con server, đặt trong `/opt/mongo` và phân quyền cho file đó, chỉ phân quyền cho file đó.
+
+```
+# sudo mkdir /opt/mongo
+# tạo folder nếu chưa có# sudo mv ~/mongo-keyfile /opt/mongo
+# nếu bạn dùng SSH để copy thì nhớ copy vào /opt/mongo
+# lệnh bên dưới chmod 400 set quyền chỉ đọc cho người sở hữu còn lại thì không có quyền hạn gì cả
+sudo chmod 400 /opt/mongo/mongo-keyfile
+# lệnh dưới gán quyền sở hữu cho mongodb, kết hợp với lệnh trên thì chỉ có mongodb mới có quyền đọc( ngoại lệ đối với root, root là full quyền)
+sudo chown mongodb:mongodb /opt/mongo/mongo-keyfile
+```
+
+Để cho đơn giản mình giả sử bạn có 5 con server có ip và port mở như bên dưới. Chúng nó đều có thể kết nối tới nhau.
+
+```
+# 2 config server mình sẽ gán nó là conf1:27017 và conf2:27017
+- 100.100.100.101:27017
+- 100.100.100.102:27017
+# 1 con router server mình sẽ gán nó à router:27017
+- 200.200.200.200:27017
+# 2 con server để tạo ra một con shard chạy replicaset mình sẽ gán   luôn là shard1
+- 300.300.300.301:27017
+- 300.300.300.302:27017
+```
+
+Rồi bắt đầu, chúng ta sẽ bắt đầu setup config server chạy replicatSet trước.
+
+**BƯỚC 1 : CÀI ĐẶT CONFIG SERVER**
+
+Chui vào cả hai con config server. Sửa nội dung file /etc/mongod.conf lại sao cho đúng, cho nó bindIp đúng với ip của nó và thêm field xác thực nhau bằng mongo-keyfile ,`replication replSetName` và trong file đó. Ngoài ra thêm `sharding clusterRole` cho cả hai server, nội dung file có thêm vài trường như bên dưới. Đảm bảo là các bạn đã thực hiện trên hai server conf1 và conf2.
+
+```
+port: 27017
+  bindIp: 100.100.100.101security:
+  authorization: enabled
+  keyFile: /opt/mongo/mongo-keyfilereplication:
+  replSetName: configReplSetsharding:
+  clusterRole: "configsvr"
+```
+
+Sau đó bạn hãy start mongod trên 2 con config server.
+
+```
+sudo systemctl start mongod
+```
+
+Sau đó dùng dùng kết nối vào 1 trong hai con config server, để kết nối 2 con lại với nhau.
+
+```
+mongo 100.100.100.101:27017 -u mongo-admin -p 123 --authenticationDatabase admin
+```
+
+Từ mongo shell các bạn chạy tiếp lệnh sau
+
+```
+rs.initiate( { _id: "0", configsvr: true, members: [ { _id: 0, host: "100.100.100.101:27017" }, { _id: 1, host: "100.100.100.102:27017" }] } )# lệnh trên khởi tạo 1 replicaSet gồm 2 con config server, các bạn nhớ ghi đúng ip nhé.
+```
+
+Nếu bạn làm đúng như vậy thì sẽ nhận được một message bên dưới báo hiệu 2 config server của chúng ta đã sẵn sàng cho chạy replicaSet.
+
+```
+{ "ok" : 1 }
+```
+
+Để kiểm tra tình trạng của 2 con server các bạn chạy lệnh
+
+```
+rs.status()
+```
+
+Nếu kết quả như bên dưới thì chúng mừng bạn đã setup thành công config server.
+
+```
+configReplSet:SECONDARY> rs.status()
+{
+    "set" : "configReplSet",
+    "date" : ISODate("2020-02-20T14:11:18.382Z"),
+    "myState" : 1,
+    "term" : NumberLong(1),
+    "configsvr" : true,
+    "heartbeatIntervalMillis" : NumberLong(2000),
+    "members" : [
+        {
+            "_id" : 0,
+            "name" : "100.100.100.101:27017",
+            "health" : 1,
+            "state" : 1,
+            "stateStr" : "PRIMARY",
+            "uptime" : 272,
+            "optime" : {
+                "ts" : Timestamp(1479823872, 1),
+                "t" : NumberLong(1)
+            },
+            "optimeDate" : ISODate("2020-02-20T14:11:18.382Z"),
+            "infoMessage" : "could not find member to sync from",
+            "electionTime" : Timestamp(1479823871, 1),
+            "electionDate" : ISODate("2020-02-20T14:11:18.382Z"),
+            "configVersion" : 1,
+            "self" : true
+        },
+        {
+            "_id" : 1,
+            "name" : "100.100.100.102:27017",
+            "health" : 1,
+            "state" : 2,
+            "stateStr" : "SECONDARY",
+            "uptime" : 17,
+            "optime" : {
+                "ts" : Timestamp(1479823872, 1),
+                "t" : NumberLong(1)
+            },
+            "optimeDate" : ISODate("2020-02-20T14:11:18.382Z"),
+            "lastHeartbeat" : ISODate("2020-02-20T14:11:18.382Z"),
+            "lastHeartbeatRecv" : ISODate("2020-02-20T14:11:18.382Z"),
+            "pingMs" : NumberLong(1),
+            "syncingTo" : "100.100.100.101:27019",
+            "configVersion" : 1
+        }
+       ],
+    "ok" : 1
+}
+```
+
+**BƯỚC 2: CÀI ĐẶT QUERY ROUTER**
+
+Trong bước này, chúng ta sẽ cài đặt MongoDB query router, nó sẽ thu lượm thông tin metadata từ config servers, cache nó và sự dụng để gửi các request đọc ghi đến đúng shards. Cài đặt query router thực chất là chạy một tiến trình `mongos` ta có thể đăng kí nó như là một systemd service. Nhưng trước hết phải tạo file config cho mongos , file config cho mongos đặt ở `/etc/mongos.conf`
+
+```
+# chỉ định nơi để ghi log.
+systemLog:
+ destination: file
+ logAppend: true
+  path: /var/log/mongodb/mongos.log
+
+# cài đặt mạng bind trên ip
+net:
+ port: 27017
+ bindIp: 200.200.200.200# sử dụng mongo-keyfile để authenticate trong cluster
+security:
+ keyFile: /opt/mongo/mongo-keyfile# setup config server cho nó
+sharding:
+ configDB: configReplSet/100.100.100.101:27017,100.100.100.101:27017
+```
+
+Sau đó ta sẽ đăng kí `mongos` với systemd. Tạo một file `lib/systemd/system/mongos.service` với nội dung như bên dưới.
+
+```
+[Unit]
+Description=Mongo Cluster Router
+After=network.target
+
+[Service]
+User=mongodb
+Group=mongodb
+ExecStart=/usr/bin/mongos --config /etc/mongos.conf
+# file size
+LimitFSIZE=infinity
+# cpu time
+LimitCPU=infinity
+# virtual memory size
+LimitAS=infinity
+# open files
+LimitNOFILE=64000
+# processes/threads
+LimitNPROC=64000
+# total threads (user+kernel)
+TasksMax=infinity
+TasksAccounting=false
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Để mongos chạy thì phải tắt phải mongod tránh trường hợp confic data, sau khi tắt thì sẽ enable các mongos service đó và start nó. Tiếp theo là check status của mongos.
+
+```
+sudo systemctl stop mongod
+sudo systemctl enable mongos.service
+sudo systemctl start mongos
+sudo systemctl status mongos
+```
+
+Nếu các bạn làm đúng như trên thì output sẽ tương tự như bên dưới.
+
+```
+Loaded: loaded (/lib/systemd/system/mongos.service; enabled; vendor preset: enabled)
+Active: active (running) since Tue 2020-02-20 19:43:05 UTC; 10s ago
+Main PID: 3901 (mongos)
+CGroup: /system.slice/mongos.service
+    └─3901 /usr/bin/mongos --config /etc/mongos.conf
+```
+
+Vậy là bạn đã setup thành công `query router server` .
+
+**BƯỚC 3: THÊM SHARD VÀO SERVER**
+
+Trước khi thêm shard vào server thì các bãn hãy setup 2 con server còn lại để chúng nó chạy replicaSet với nhau. Setup giống hoàn toàn so với config server chỉ khác là trong file config. Thay vì vai trò của nó là config server thì vai trò của nó là “shardsvr” còn tên replicaSet thì để nguyên cũng được, không thì các bạn đổi tùy thích. Còn IP thì các bạn bind cho đúng
+
+- 300.300.300.301
+- 300.300.300.302
+
+```
+sharding:
+    clusterRole: shardsvr
+```
+
+Sau khi setup xong 2 con server chạy replicaSet thì mình sẽ tiến hành đưa nó vào shard.
+
+Từ một trong hai server vừa mới setup đó (hoặc ở đâu cũng được) , bạn hãy kết nối đến query router.
+
+```
+mongo 200.200.200.200:27017 -u mongo-admin -p 123 --authenticationDatabase admin
+```
+
+Sau khi kết nối thành công các bạn chạy lệnh sau để add shard chúng ta vừa mới tạo ra để đưa nó vào cluster. Giả sử lúc nãy các bạn setup shard chạy replicaSet với name là rs999.
+
+```
+sh.addShard( "rs999/300.300.300.301:27017,300.300.300.302:27017")
+```
+
+Tại thời điểm này, các bạn đã setup thành công cluster. Để test liệu nó có hoạt động hay không các bạn hãy kết nối từ máy của bạn tới query router server.
+
+Nếu kết nối được chúng ta sẽ thử kích hoạt tính năng sharding ở tầng database.
+
+```
+mongo 200.200.200.2000:7017 -u mongo-admin -p 123 --authenticationDatabase admin
+```
+
+Sau đó từ mongo shell, mình sẽ tạo một database tên là demo và kích hoạt sharding trên database demo.
+
+```
+use demo
+sh.enableSharding("demo")
+```
+
+Để kiểm tra rằng việc sharding đã thành công mình chuyển qua database config, nơi chứa thông tin của hệ thống.
+
+```
+use config
+db.databases.find()
+```
+
+Nếu trả về kết quả như bên dưới thì chúc mừng bạn đã thành công.
+
+```
+{ "_id" : "demo", "primary" : "shard0001", "partitioned" : true }
+```
+
+---
+
+Các bạn hãy thử tạo vài document, để thực hiện các thao tác find, update, delete xem cluster của chúng ta hoạt động ổn không nhé. Còn về phần mình, đã khuya rồi mình xin đừng viết tại đây, sáng mai còn phải đi về chợ dọn hàng ra bán nữa :v
+
+Trong tương lai, mình sẽ tìm hiểu các kĩ thuật sharding và hi vọng sẽ có nhưng điều thú vị để viết về và chia sẻ, các ơn các bạn đã đọc bài.
+
+\#KeepCalmAndCodeOn

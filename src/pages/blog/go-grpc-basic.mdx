@@ -1,0 +1,135 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "January 3, 2020",
+  slug: "/blog/go-grpc-basic",
+  title: "Giao tiếp Client Server bằng gRPC",
+  description: "",
+}
+
+export default Post(meta)
+
+Hế nhô các bạn, để tiếp tục cho bài viết [**trước**](https://medium.com/@nguynhung/đua-tốc-độ-với-protoco-buffer-b2c1fc4d7a5) hôm nay mình xin giới thiệu với các cách giao tiếp giữa client/server với tốc độ bàn thờ, mà mình vừa mới tìm hiểu.
+
+Trước hết gRPC theo google giới thiệu
+
+> gRPC is a modern open source high performance RPC framework that can run in any environment. It can efficiently connect services in and across data centers with pluggable support for load balancing, tracing, health checking and authentication. It is also applicable in last mile of distributed computing to connect devices, mobile applications and browsers to backend services.
+
+gRPC là một RPC framework gíup bạn kết nối giữa các service trong hệ thống, nó hỗ trợ load balancing, tracing, health checking và authentication, hỗ trợ từ ứng dụng mobile, trình duyệt cho tới back-end service.
+
+gRPC sử dụng Protocol Buffer để transfer data thay vì JSON/XML truyền thống nên tốc độ được gia tăng đáng kế, ngoài ra nó cũng dùng RPC thay cho REST API, trong việc thiết kế API, sự khác biệt giữa REST API vs RPC là REST được thiết kế để tập trung vào Resource còn RPC thì tập trung vào action, hành động. Bạn có thể xem kĩ hơn ở [**đây**](https://www.smashingmagazine.com/2016/09/understanding-rest-and-rpc-for-http-apis/)**.**
+
+Về cơ bản, khi làm việc với gRPC bạn định nghĩa các action, input message, output mesage trong service, sau đó protobuf compiler sẽ generate code ra file theo ngôn ngữ bạn sử dụng. Sau đó bạn sẽ triển khai các action của service như những gì đã bạn đã mô tả .
+
+Trong bài viết này, mĩnh sẽ triển khai một User Service cho phép client thực hiện chức năng cơ bản là đăng kí và đăng nhập mình định nghĩa các message và service gồm những action như sau.
+
+```
+syntax  = "proto3";
+
+package rpc;
+
+message AccessToken{
+    string access_token = 1;
+}
+
+message Credentials{
+    string username = 1;
+    string password = 2;
+}
+
+message LoginResult{
+    bool ok = 1;
+    AccessToken data = 2;
+}
+
+message FormRegister{
+    string first_name = 1;
+    string last_nane = 2;
+    string email = 3;
+    string password  =4;
+    string phone_number = 5;
+    string address = 6;
+}
+
+message RegisterResult{
+    bool ok  = 1;
+    AccessToken data = 2;
+}
+```
+
+Service user
+
+```
+syntax = "proto3";
+
+package rpc;
+
+import "user.message.proto";
+
+service User{
+    rpc UserLogin(Credentials) returns (LoginResult){};
+    rpc UserRegister(FormRegister) returns (RegisterResult){};
+}
+```
+
+Như các bạn có thể thấy Service của mình sẽ có 2 action có thể được thực hiện là UserLogin và UserRegister, mình đã mô tả in,out message đầy đủ trong file “user.rpc.go". Mình sẽ tiến hành biên dịch ra go file.
+
+Để biên dịch ra go file mình dùng lệnh dưới, lênh này sẽ biên dịch tất cả các file proto trong thư mục protobuf và lưu lại trong thư mục rpc.
+
+```
+protoc --proto_path=protobuf  --go_out=plugins=grpc:rpc protobuf/*.proto
+```
+
+Mình nói qua chút về cấu trúc thư muc của project.
+
+![img](https://miro.medium.com/max/1264/1*-s-uOXt4xVd3QSvo3KJZJA.png)
+
+- **Protobuf** là nơi mình lưu trữ tất cả các file .proto
+- **rpc** là nơi mà các file output mà đã được biên dịch
+- **entity** là nơi mình khai báo các action cho từng service, các action của một service sẽ nằm trong một file, ví dụ tất cả các action của user service sẽ nằm trong file user.go.
+- **server** tên là server nhưng nó sẽ có 2 vài trò, 1 là làm vai trò server nhận request từ nơi nào đó (A) sau đó sẽ làm vai trò là client, gọi 1 action từ gRPC server nhận kết quả sau đó trả về cho phía (A).
+- **main.go** đây là nơi mình khởi tạo gRPC server và đăng kí các service vào server.
+
+Sau khi định nghĩa các action, in,out message cho từng action, mình sẽ tiến hành khai báo cụ thể các action sẽ thực hiện như thế nào, mình sẽ không đi sâu vào các action và sẽ demo đơn giản như thế này.
+
+![img](https://miro.medium.com/max/3340/1*xrulMVv7y6_Ojim119R0dA.png)
+
+Như ảnh phía trênm mình định nghĩa hai chi tiết 2 action UserLogin, UserRegister sẽ được thực hiện như thế nào, hai action function này sẽ được khai báo trên struct user_service để implement interface mà ta đã định nghĩa ở trong phần khai báo trong file proto.
+
+![img](https://miro.medium.com/max/2556/1*G6Lyhony3lyGz5jS4-U5fQ.png)
+
+Trong file main.go phía trên, mình start một client cho gRPC, client này đống vai trò như là một server đối với người dùng.
+
+![img](https://miro.medium.com/max/2448/1*m0sCcjwVV8nnPqVg3if8qQ.png)
+
+Để tạo Client đối với gRPC server như hình dưới, Package RPC được compile từ proto đã có những method cho phép tạo đăng kí client cho service được miêu tả.
+
+![img](https://miro.medium.com/max/2120/1*huVFdI5yVVkpjzwRgfAuKg.png)
+
+Client ( đối với gRPC server sẽ gọi là C1 )này sẽ lắng nghe request từ người dùng ( sẽ gọi là A) , sau đó tạo ra một message để gọi 1 action trên gRPC server, nhận response và lại trả về cho phía (A). Ví dụ khi user thực hiện đăng kí tài khoản thì C1 sẽ tạo một message từ data từ phía A dạng JSON đó ra Protobuf rồi call một action của User Service trên gRPC server sau đó nhận kết qủa và trả về cho phía A, như hình dưới.
+
+![img](https://miro.medium.com/max/2684/1*4AayqI2ky8fwTnceaF9FbQ.png)
+
+Tiếp theo thử chạy Server và thực hiện 1 Request Register từ phía người dùng, để start bạn chạy lệnh
+
+```
+go run main.go
+```
+
+![img](https://miro.medium.com/max/3176/1*HDxUIYiHTDslImOl09Q6Jg.png)
+
+Dùng Postman để gửi request lên Server(C1).
+
+![img](https://miro.medium.com/max/4120/1*hBayc_fDFXMW9VrMXE88FA.png)
+
+---
+
+Vậy là mình đã thực hiện được việc giao tiếp đơn giản giữa client/server (
+server C1 vs gRPC server ) bằng gRPC framwork. Do mới tìm hiểu nên mình chỉ có thể viết đến đây thôi, trong tương lai, nếu có cơ hội làm việc mới gRPC thì mình sẽ học hỏi và chia sẻ với các bạn nhiều hơn, Cảm ơn các bạn đã đọc bài viết, Bye bye các bạn :D
+
+Source code demo :
+
+- https://github.com/dongnguyenltqb/demogrpc
+- https://github.com/dongnguyenltqb/share-proto
+
+![img](https://miro.medium.com/max/756/0*z5K_LOtCRQWZwq14.png)

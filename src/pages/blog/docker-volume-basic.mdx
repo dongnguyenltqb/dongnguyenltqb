@@ -1,0 +1,122 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "January 9, 2020",
+  slug: "/blog/docker-volume-basic",
+  title: "Share data giữa Docker Container bằng Docker Volume",
+  description: "",
+}
+
+export default Post(meta)
+
+Như chúng ta đều biết, đặc điểm của Docker container là chúng chạy độc lập, và không ảnh hưởng đến nhau, thế nhưng vì một lí do nào đó, chúng ta lại muốn chia sẻ data giữa các container ví dụ, bạn có một 2,3 web server nginx và mong muốn khi chúng share chung các file config, hay html tĩnh. May mắn docker cung cấp volume để thực hiện việc đó.
+
+Docker volume là một volume được tạo ra cho phép các container mount volume vào trong các container hay dễ hiểu hơn là đocker sử dụng Volume đó thay thế cho 1 folder của container.
+
+Để tiến hành chia sẻ file html tĩnh cho các 2 web server nginx, đầu tiên mình tạo một volume và đặt tên nó là **nginx-static-html-share-volume**
+
+```
+docker volume create nginx-static-html-share-volume
+```
+
+![img](https://miro.medium.com/max/3272/1*1BeNDtNKPvOeFDsYcr3ItA.png)
+
+Mỗi volume được lưu trữ trong host file system **\*(/var/lib/docker/volumes/)\***, và được docker quản lí.
+
+Để xem thông tin chi tiết hơn về volume đã được tạo mình dùng lệnh.
+
+```
+docker volume inspect nginx-static-html-share-volume
+```
+
+![img](https://miro.medium.com/max/3496/1*F7a88q6--r1LTJFilcOpiw.png)
+
+Như các bạn thấy thì volume chúng ta nằm ở **“/var/lib/docker/volumes/nginx-static-html-share-volume/\_data”**
+
+Trước khi chui vào đây thì mình sẽ tạo ra hai web server nginx share folder **“/usr/share/html”** cho cả hai bằng cách mount volume đó vào 2 container.
+
+```
+docker run -d --name nginx1 --mount source=nginx-static-html-share-volume,destination=/usr/share/nginx/html -p 2222:80 nginx
+docker run -d --name nginx2 --mount source=nginx-static-html-share-volume,destination=/usr/share/nginx/html -p 2223:80 nginx
+```
+
+Khi bạn chạy docker run một container, có chỉ định — mount, đầu tiên docker sẽ xem volume đã tồn tại hay chưa, nếu chưa thì docker sẽ tạo volume đó. Sau đó docker sẽ tiến hành copy tất cả các file trong **destination** vào volume và sau khi copy xong docker container sẽ sử dụng volume đó thay cho destination. Mọi thao tác của container với destination thực chất là thao tác với docker volume.
+
+![img](https://miro.medium.com/max/5760/1*kFRH7CuqwPFxlV1fjQps2Q.png)
+
+Hai Web server của mình đã chạy, để tiến hành kiểm tra mình gửi 2 get request tới 2 server và thực sự chúng đã chạy và share chung forder **“/usr/share/html”.**
+
+![img](https://miro.medium.com/max/2492/1*GMg2ED6L9J2Lr7g5OZ6Syw.png)
+
+Và giờ mình sẽ chui vào docker VM để xem các volume của chúng ta có gì. Để login vào docker VM mình dùng lệnh.
+
+```
+screen $HOME/Library/Containers/com.docker.docker/Data/vms/0/tty
+```
+
+Nói sơ qua một chút về screen, screen cũng tương tự như việc bạn ssh đến một server, nhưng điểm khác với ssh là ví dụ như vì một lí do nào đó mà bị mất kết nối ( ví dụ mạng mất ) thì phiên làm việc (session) của ssh đó sẽ mất, nhưng với screen thì chúng ta có thể kiểm tra các session và resume lại các session đó để làm việc tiếp.
+
+Sau Khi dùng lệnh trên thì mình đã ở trong docker VM, mình sẽ chui vào **“/var/lib/docker/volumes/nginx-static-html-share-volume/\_data”**
+
+để xem có gì không.
+
+![img](https://miro.medium.com/max/2628/1*FTFvSi6AdMkdAh6Ar5hRhA.png)
+
+![img](https://miro.medium.com/max/2792/1*qZAtOwr8cDYDs9JI2YJOcg.png)
+
+Đây rồi, thư mục **/usr/share/nginx/html**
+
+đã được share chung giữa 2 nginx container. Có hai file index.html, 50x.html, mình sẽ tiến hành edit index.html xem nó có tác động gì đến hai nginx server không.
+
+```
+echo "Nginx web Server" > index.html
+```
+
+![img](https://miro.medium.com/max/3024/1*bywOmzPYNElP69ZwWkLOxw.png)
+
+Nổi dung file đã thay đổi mình sẽ tiến hành gửi hai get request tới 2 server và kì vọng nội dung trả về của hai server trả về sẽ giống nhau.
+
+```
+curl localhost:2222
+curl localhost:2223
+```
+
+Và đúng như kì vọng, 2 Docker container đã share chung được data bằng cách mount volume **“nginx-static-html-share-volume"** vào **“usr/share/nginx/html”** của 2 container.
+
+![img](https://miro.medium.com/max/2136/1*zFHkA9KqxW2mHx9sMKtYnQ.png)
+
+Và nếu sau này bạn không có nhu cầu sử dụng volume nữa thì hay **remove**
+
+nó nhưng trước khi remove nó bạn phải stop và remove docker container.
+
+Để stop và remove container dùng lệnh
+
+```
+docker stop <tên container>
+docker rm <tên container>
+```
+
+Để remove volume dùng lệnh
+
+```
+docker volume remove <tên volume>
+```
+
+![img](https://miro.medium.com/max/3312/1*tbRnR8IBHX2Zogw1bT9cCw.png)
+
+Và sau khi remove mình lại chui vào docker VM để coi nó đã xoá hay chưa. Lúc nãy mình có tắt ngang “screen" và để coi còn nhưng screen session nào và để resume lại vào session đó mình dùng các lệnh sau.
+
+```
+screen -ls      // lệnh này sẽ list ra những session đang tồn tại
+screen -r <screen-session-id>       // resume một session.
+```
+
+![img](https://miro.medium.com/max/3024/1*7Ne_0UQ5MMSoTDCk6MLXMA.png)
+
+![img](https://miro.medium.com/max/3972/1*7nsVJZGp5zA6EsCYQUHypQ.png)
+
+Vậy là volume của mình đã bị xoá.
+
+---
+
+**Tổng kết** : Ở bài viết trên mình giới thiêụ với các bạn một số điều cơ bản về docker volume và share data giữa các container bằng docker volume. Mình sẽ tìm hiểu thêm và sẽ chia sẻ với các bạn trong những bài viết sau. Cảm ơn các bạn đã đọc bài viết. Bye bye các bạn. ^\_^

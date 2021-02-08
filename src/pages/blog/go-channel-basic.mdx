@@ -1,0 +1,114 @@
+import Post from "../../components/blog/post"
+
+export const meta = {
+  date: "December 25, 2019",
+  slug: "/blog/go-channel-basic",
+  title: "Một chút vui vẻ với Go Channel",
+  description: "",
+}
+
+export default Post(meta)
+
+Hế nhô các bạn, sau một thời gian làm việc với NodeJS thì mình biết đến go một cách tình cờ qua một lần đi phỏng vấn. Và bây giờ mình đã đến với Go bằng tất cả tâm tư, cũng như những kinh nghiệm khi mình đã làm việc với NodeJS
+
+Ngày Đầu học Go, đọc đâu cũng thấy Go Channel is awesome, Go is concurrency, the modern programming language…, thật là thú vị, google vài vòng mình cx nhanh chóng nhận ra một điểm mà Go làm tốt hơn NodeJS là create Worker process, channel và goroutine là nguyên nhân khiến việc kiểm soát Worker dễ hơn NodeJS rất nhiều, ví dụ để giới hạn n Worker cùng nhau chạy đồng thời chúng ta chỉ cần tạo cho nó một buffered channel sau đó chạy n Worker trong n goroutine.
+
+```go
+// create a buffered channel
+var UploadPool chan WorkerMessage
+
+// worker subcribe to channel and do something with it Sleep for example
+func Worker(UploadPool chan WorkerMessage){
+  for {
+	workerMessage := <- UploadPool
+   	time.Sleep(time.Second)
+  }
+}
+// init function to run n worker in goroutine
+func InitWorker(numWorker int, UploadPool chan WorkerMessage){
+	for i:=1;i<=numWorker;i++{
+		go Worker(UploadPool)
+	}
+}
+```
+
+Và tiếp theo đây, nhân dịp mình đang dùng NodeJS để xử lí upload ảnh, và resize ảnh nên mình sẽ làm điều tương tự với GoLang để xem chúng nó có gì hay.
+
+![img](https://miro.medium.com/max/3442/1*OETq4vv97MtUxbId1n0PyA.png)
+
+Nào cùng bắt đầu với Follow 1: Lắng nghe form-data request từ front end và save file to local. Mình sẽ sử dụng [Gin Framework](https://gin-gonic.com/), một web framework nhiều sao nhất trên github.
+
+```go
+func HandleUploadForm(c *gin.Context) {
+	form,_ := c.MultipartForm()
+	files := form.File["files"]
+	var fileNames []string
+	for _, file := range files {
+		fileName :=fmt.Sprintf("%v",uuid.New()) + file.Filename
+		fileNames = append(fileNames,fileName)
+		c.SaveUploadedFile(file, "storage/image/"+fileName)
+	}
+	c.JSON(200, utils.ApiResponse{
+		Ok:      true,
+		Message: "Uploaded successfully.....",
+		Data:    fileNames,
+	})
+	for _,fileName := range fileNames{
+    // loop and push WorkerMessage to UploadPool for Worker.
+		UploadPool <- WorkerMessage{FileName: fileName,Resize:true}
+	}
+}
+```
+
+Như trong đoạn code đầu chúng ta đã có n Worker chạy concurrency và đang trong trang thái chờ nhận file để upload lên GCloud. Thêm cho nó 1 function để nó có thể upload lên GCloud nào. Thêm channel finished cho mỗi goroutine để có thể hứng được kết quả của mỗi task upload, tuỳ vào kết quả và theo logic của mỗi người mà chúng ta sẽ xử lí tiếp.
+
+```go
+func uploadToGCloudStorage(fileName string, finished chan bool) {
+	f, err := os.Open("storage/image/" + fileName)
+	if err != nil {
+		utils.Logger("error", err)
+		return
+	}
+	defer f.Close()
+	object := Bucket.Object(fileName)
+	wc := object.NewWriter(context.Background())
+	if _, err = io.Copy(wc, f); err != nil {
+		utils.Logger("error", err)
+		return
+	}
+	if err := wc.Close(); err != nil {
+		utils.Logger("error", err)
+		return
+	}
+	fmt.Println(utils.ApplyStyle("bold", "yellow", "Upload to Cloud successfully...."))
+	object.ACL().Set(context.Background(),storage.AllUsers,storage.RoleReader)
+	objectAddress := ObjectAddress{
+		ID:primitive.NewObjectID(),
+		FileName: fileName,
+	}
+	_,err = database.Models.Object.InsertOne(context.Background(),objectAddress)
+	if err != nil {
+		utils.Logger("error",err)
+	}
+	finished <- true
+}
+
+
+func UploadImageTaskConsumer(UploadPool chan WorkerMessage){
+	for {
+		workerMessage := <- UploadPool
+		finished := make(chan bool)
+		if workerMessage.Resize == true {
+			go ImageAnalysis(ObjectAddress{
+				FileName: workerMessage.FileName,
+			})
+		}
+		go uploadToGCloudStorage(workerMessage.FileName,finished)
+		<- finished
+	}
+}
+```
+
+Vậy là xong vụ upload file, so sánh với NodeJS thì thay vì phải quản lí Worker rất vất vả nodejs thì giờ đây, chúng ta có thể làm điều đó dễ dàng với Go Channel.
+
+Các bạn có thể xem responstory của mình tại [đây](https://github.com/dongnguyenltqb/go-simple), mình mong được các bạn góp ý để cải thiện bản thân, trở nên tốt hơn.
