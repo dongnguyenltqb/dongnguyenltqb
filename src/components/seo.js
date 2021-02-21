@@ -2,7 +2,7 @@ import Head from "next/head"
 
 const config = {
   author: "Dong Nguyen",
-  url: "https://dongnguyen.dev",
+  url: "https://dong.spiritlabs.co",
   title: "Dong Nguyen",
   description: "To write is to think, and to write well is to think well.",
   image: "/assets/images/cover.png",
