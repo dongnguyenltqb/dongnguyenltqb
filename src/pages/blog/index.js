@@ -4,10 +4,10 @@ import Link from "next/link"
 import { importAll } from "../../utils"
 import Page from "../../components/page"
 
-let postList = importAll(require.context(".", true, /.mdx?$/))
+const postList = importAll(require.context(".", true, /.mdx?$/))
 postList.sort((a, b) => {
-  let da = new Date(a.meta.date).valueOf()
-  let db = new Date(b.meta.date).valueOf()
+  const da = new Date(a.meta.date).valueOf()
+  const db = new Date(b.meta.date).valueOf()
   return db - da
 })
 export default function BlogListing() {
@@ -23,9 +23,6 @@ export default function BlogListing() {
                   <h2 className="text-xl font-bold leading-tight tablet:text-2xl desktop:text-2xl hover:text-primary">
                     {meta.title}
                   </h2>
-                  {/* <p className="mt-1 text-base tablet:text-lg desktop:text-xl"> */}
-                  {/*   {meta.description} */}
-                  {/* </p> */}
                 </li>
               </a>
             </Link>
